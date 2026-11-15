@@ -22,7 +22,7 @@ From a completed Windows skirmish to Android battlefields, keyboard and mouse co
 
 | Android · Base and battlefield | macOS · Selection and movement |
 | :---: | :---: |
-| [![Android gameplay](docs/images/android-battlefield.jpg)](https://www.bilibili.com/video/BV1qDsE67ECV/) | [![macOS gameplay](docs/images/macos-battlefield.jpg)](https://www.bilibili.com/video/BV1jws56vE25/) |
+| [<img src="https://raw.githubusercontent.com/HolyCaonima/ra3-ios-android-win-mac-recomp/main/docs/images/android-battlefield.jpg" width="420" alt="Android gameplay">](https://www.bilibili.com/video/BV1qDsE67ECV/) | [<img src="docs/images/macos-battlefield.jpg" width="420" alt="macOS gameplay">](https://www.bilibili.com/video/BV1jws56vE25/) |
 
 <details>
 <summary><strong>iPad ↔ Mac · Both devices in the battlefield</strong></summary>

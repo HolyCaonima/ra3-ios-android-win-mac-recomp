@@ -22,7 +22,7 @@
 
 | Android · 战场与基地 | macOS · 单位选择与移动 |
 | :---: | :---: |
-| [![Android 原生运行演示](docs/images/android-battlefield.jpg)](https://www.bilibili.com/video/BV1qDsE67ECV/) | [![macOS 原生运行演示](docs/images/macos-battlefield.jpg)](https://www.bilibili.com/video/BV1jws56vE25/) |
+| [<img src="https://raw.githubusercontent.com/HolyCaonima/ra3-ios-android-win-mac-recomp/main/docs/images/android-battlefield.jpg" width="420" alt="Android 原生运行演示">](https://www.bilibili.com/video/BV1qDsE67ECV/) | [<img src="docs/images/macos-battlefield.jpg" width="420" alt="macOS 原生运行演示">](https://www.bilibili.com/video/BV1jws56vE25/) |
 
 <details>
 <summary><strong>iPad ↔ Mac · 双端联机画面</strong></summary>
