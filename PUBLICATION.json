@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "review_date": "2026-11-15",
+  "scope": "Selected public documentation and generic tools only; no private history or game-derived artifacts.",
+  "files": [
+    {
+      "path": ".githooks/pre-commit",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": ".github/workflows/public-check.yml",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": ".gitignore",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "AGENTS.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "LEGAL.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "LICENSE",
+      "provenance": "Standard MIT license text; project copyright notice."
+    },
+    {
+      "path": "PUBLICATION.json",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "README.en.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "README.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "cmake/BuildProfile.cmake",
+      "provenance": "Project build-configuration logic, adapted for standalone public use; no third-party or game input."
+    },
+    {
+      "path": "cmake/build_profile.h.in",
+      "provenance": "Project build-configuration logic, adapted for standalone public use; no third-party or game input."
+    },
+    {
+      "path": "cmake/build_profile.json.in",
+      "provenance": "Project build-configuration logic, adapted for standalone public use; no third-party or game input."
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "docs/METHOD.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "docs/PORTING-NOTES.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "docs/PUBLICATION.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "docs/STATUS.md",
+      "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "examples/build-profile/CMakeLists.txt",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "requirements.txt",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tests/test_publication_guard.py",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tests/test_tools.py",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tools/publication_guard.py",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tools/shotdiff.py",
+      "provenance": "Project generic image-statistics tool, adapted with standalone CLI and synthetic validation."
+    },
+    {
+      "path": "tools/verify.py",
+      "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    }
+  ]
+}

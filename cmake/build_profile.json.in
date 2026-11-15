@@ -1,0 +1,4 @@
+{
+  "profile": "@RA3_BUILD_PROFILE@",
+  "cmake_configuration": "@RA3_PROFILE_CONFIG@"
+}

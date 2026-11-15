@@ -1,0 +1,2 @@
+# External dependency; no third-party source is bundled.
+Pillow==12.1.0

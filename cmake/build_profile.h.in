@@ -1,0 +1,4 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+#define RA3_BUILD_PROFILE_NAME "@RA3_BUILD_PROFILE@"
+#define RA3_BUILD_CONFIG_NAME "@RA3_PROFILE_CONFIG@"
