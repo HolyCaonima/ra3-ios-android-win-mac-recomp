@@ -68,6 +68,10 @@
       "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
     },
     {
+      "path": "README.zh-CN.md",
+      "provenance": "Previously reviewed Chinese README, moved from README.md; language navigation updated."
+    },
+    {
       "path": "THIRD_PARTY.md",
       "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
     },
