@@ -1,0 +1,18 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+# DXVK's ProcessVertices emulation uses a geometry shader. Devices without
+# geometryShader cannot use it even if vertex stores are supported.
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -4733,7 +4733,9 @@
+ 
+ 
+   bool D3D9DeviceEx::SupportsSWVP() {
+-    return m_dxvkDevice->features().core.features.vertexPipelineStoresAndAtomics;
++    const auto& features = m_dxvkDevice->features().core.features;
++    // ProcessVertices emits geometry shaders and its buffers use that stage.
++    return features.vertexPipelineStoresAndAtomics && features.geometryShader;
+   }
+ 
+ 

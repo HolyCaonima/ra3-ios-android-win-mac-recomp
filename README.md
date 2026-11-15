@@ -1,58 +1,57 @@
-# RA3 · iOS / Android / Windows / macOS recompilation research
+# Red Alert 3 — Native Recompilation
 
-**红色警戒 3 静态重编译研究：公开方法、工程经验和少量通用工具。**
+**[English](README.en.md)**
 
-[English](README.en.md) · [架构](docs/ARCHITECTURE.md) · [方法](docs/METHOD.md) · [进度与限制](docs/STATUS.md) · [公开边界](LEGAL.md)
+[![Public checks](https://github.com/HolyCaonima/ra3-ios-android-win-mac-recomp/actions/workflows/public-check.yml/badge.svg)](https://github.com/HolyCaonima/ra3-ios-android-win-mac-recomp/actions/workflows/public-check.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Progress videos](https://img.shields.io/badge/Bilibili-开发实录-00A1D6)](https://space.bilibili.com/3546857907162034)
 
-这个项目研究如何将旧有 x86 程序的执行语义转为可移植 C，并通过宿主兼容层连接现代平台的图形、音频、输入和文件系统。开发路线从 Windows 上的对照验证，扩展到 Android、macOS 和 iOS / iPad。
+**把《红色警戒 3》的 x86 执行逻辑静态重编译为 C，在 iPad、Android、Windows 和 macOS 上探索原生运行。**
 
-**这里是经过单独整理的部分开源版本，不是完整游戏移植源码，也不能直接构建或运行游戏。** 游戏代码及其反编译、lift、重编译表示，游戏资源、着色器及其转换结果，可运行游戏包和授权信息均不在本仓库中。拥有正版游戏也不会让本仓库自动成为完整构建工具链。
+从 Windows 上的整局遭遇战，到 Android 的战场、Apple Silicon 上的键鼠操作，再到 iPad 的苏军战役，这个仓库公开沿途用到的方法、资源处理工具、lifter 扩展、宿主组件和图形兼容补丁。
 
-## 目前做到哪里
+**2026-11-15 · iPad ↔ Mac 联机演示已更新：两端进入同一个房间并进入战场。** [观看实录 ↗](https://www.bilibili.com/video/BV1tZsH6gEGb/)
 
-以下是截至 **2026-11-15** 的开发记录摘要，不是本仓库可复现的测试结果：
+> 项目原创代码与文档采用 MIT。游戏资源本体、生成的 lift C 和游戏安装包不随仓库分发；第三方补丁保留上游许可，演示截图中的游戏画面不属于 MIT 授权。这里提供可复用的工程组件，尚不是完整游戏的一键构建工具链。
 
-| 平台 | 开发记录中的结果 | 仍需验证 |
+## 实机画面
+
+[![iPad 上的苏军战役第一关：娜塔莎与要塞](docs/images/ipad-campaign.jpg)](https://www.bilibili.com/video/BV1E7sV6vEfn/)
+
+*iPad · 苏军战役第一关。点击画面观看原视频。*
+
+| Android · 战场与基地 | macOS · 单位选择与移动 |
+| :---: | :---: |
+| [![Android 原生运行演示](docs/images/android-battlefield.jpg)](https://www.bilibili.com/video/BV1qDsE67ECV/) | [![macOS 原生运行演示](docs/images/macos-battlefield.jpg)](https://www.bilibili.com/video/BV1jws56vE25/) |
+
+<details>
+<summary><strong>iPad ↔ Mac · 双端联机画面</strong></summary>
+<br>
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1tZsH6gEGb/"><img src="docs/images/ipad-macos-lan.jpg" width="360" alt="同镜头中的 Mac 与 iPad 均已进入战场"></a>
+</p>
+</details>
+
+*画面取自 [小小祁少的开发实录](https://space.bilibili.com/3546857907162034)，用于展示进度。[截图来源与时间点](docs/SCREENSHOTS.md)。*
+
+## 目前能做到什么
+
+截至 **2026-11-15**。平台结果来自开发测试与实录；公开仓库的 CI 单独验证工具和合成用例。
+
+| 平台 / 子系统 | 已验证进展 | 下一步 |
 | --- | --- | --- |
-| Windows x86 | 1.12 遭遇战整局由开发者实际完成 | 更广场景、长时间运行 |
-| Android ARM64 | 1.12 进入战场、选中单位；片头音频和菜单已验证 | 完整对局、后台恢复、最新公共改动在真机上的回归 |
-| macOS Apple Silicon | 1.12 菜单、战场、键鼠与动画光标已验证 | 完整对局、长期稳定性、图形覆盖 |
-| iOS / iPad ARM64 | 已进入并操作对局；GPU 资源生命周期修补后的一轮真机复测通过 | 长时间压力、更多场景、性能代价 |
+| **Windows x86** | 1.12 遭遇战整局完成 | 更多地图、长时间运行 |
+| **Android ARM64** | 菜单、片头音频、进入战场和单位选择 | 完整对局、后台恢复回归 |
+| **macOS · Apple Silicon** | 战场、地形 / HUD、键鼠和动画光标 | 整局与图形覆盖 |
+| **iOS / iPad ARM64** | 战役实机操作；GPU 生命周期修补后一轮复测通过 | 长时间运行、资源保留成本 |
+| **iPad ↔ Mac LAN** | 同房间、双端进入战场 | 整局同步、原版 Windows 互通 |
+| **公开工具与补丁** | 资源处理、宿主组件、14 个 DXVK 补丁、MoltenVK 修补 | 持续拆分并公开其余原创模块 |
 
-局域网目前只记录到 iPad 与 Mac 的房间互相发现；不宣称成功加入、完整混合平台对局或与原版 Windows 互通。详见 [状态与证据边界](docs/STATUS.md)。
+ARM64 上完整的 x86 内存序保证仍是待解决项。详细结果与验证边界见 [项目状态](docs/STATUS.md)。
 
-## 思路
+## 从哪里开始
 
-```mermaid
-flowchart LR
-    A[开发者本地的合法输入] --> B[本地分析与静态翻译]
-    B --> C[本地生成的可移植 C]
-    C --> D[客体状态与兼容层]
-    D --> E[平台宿主]
-    E --> F[窗口 / 图形 / 音频 / 输入]
-```
-
-图中描述的是研究系统的分层，**不是本仓库已提供的模块列表**。
-
-关键做法是先固定输入版本，明确客体与宿主的边界，再用小范围语义验证和实际运行逐步推进。CPU 状态、异常跳转、线程同步、图形资源寿命和输入坐标都需要显式设计，不能靠“能编译”判断正确。具体见 [方法](docs/METHOD.md) 和 [移植中的经验](docs/PORTING-NOTES.md)。
-
-## 本次公开了什么
-
-| 路径 | 内容 |
-| --- | --- |
-| `docs/` | 重新撰写的架构、流程、平台经验、验证方法与状态摘要 |
-| `cmake/` | 从开发项目中抽出的 Dev / Release 配置模块与元数据模板 |
-| `examples/build-profile/` | 无游戏依赖的 CMake 配置示例 |
-| `tools/shotdiff.py` | 通用图像差异统计工具；不附带任何游戏图片 |
-| `tools/publication_guard.py` | 文件白名单、文本/体积、敏感模式、Git 索引及历史检查 |
-| `tests/` | 仅使用合成数据和临时仓库的公开工具测试 |
-| `PUBLICATION.json` | 逐文件公开清单及来源类别 |
-
-没有搬运原仓库的 Git 历史、LFS 指针或第三方源码。第一批范围刻意较小；后续候选模块必须先明确来源和依赖，再逐文件审查。
-
-## 快速检查（不需要游戏）
-
-需要 Python 3.10+、Git、CMake 3.16+；图像工具另外需要 Pillow。以下命令适用于 macOS / Linux shell；Windows 可使用 Git Bash 或等价的 Python/CMake 命令。
+**不需要游戏文件，就可以运行公开组件的测试。** 需要 Python 3.10+、Git、CMake 3.16+ 和 C 编译器；完整宿主测试适用于 macOS / Linux。
 
 ```sh
 git clone https://github.com/HolyCaonima/ra3-ios-android-win-mac-recomp.git
@@ -61,23 +60,56 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
 python -B tools/verify.py
-git config core.hooksPath .githooks
 ```
 
-`.venv/` 只允许存在于本地；索引和历史检查仍拒绝提交它。`verify.py` 检查当前目录、暂存内容、所有本地引用可达的提交历史，以及公开工具的合成测试。配置的 pre-commit hook 在提交前检查索引；[CI](.github/workflows/public-check.yml) 在推送和 PR 后执行完整检查。CI 不是发布前审查的替代品。
+要研究具体模块，从 [工具与组件指南](docs/TOOLS.md) 开始。要复用渲染器补丁，见 [DXVK](tools/dxvk/README.md) 和 [MoltenVK](tools/moltenvk/README.md)。
 
-比较你自己有权使用的图片：
+## 移植路线
 
-```sh
-python tools/shotdiff.py /path/to/a.png /path/to/b.png /path/to/diff.png
+```mermaid
+flowchart LR
+    X[x86 程序 · 本地输入] --> L[静态分析与 lift]
+    L --> C[可移植 C · 本地生成]
+    C --> H[客体状态 / Win32 兼容层]
+    H --> P[Windows / Android / macOS / iOS]
+    H --> D[D3D9 → DXVK → Vulkan]
+    D --> M[Apple: MoltenVK → Metal]
 ```
 
-图片和输出都保留在仓库之外。该指标只能帮助定位视觉差异，不代表渲染语义正确。
+1. **固定输入。** 记录版本、哈希和资源配置链，让代码与资源来自同一套输入。
+2. **补齐翻译语义。** 处理 SSE 整数运算、原子读改写和非局部跳转，遇到未支持指令明确失败。
+3. **建立宿主契约。** 把地址空间、文件路径、线程、输入与客体状态分开管理。
+4. **接通图形。** 处理移动 GPU 的可选扩展、采样器特化、窗口生命周期与坐标映射。
+5. **处理 Apple 差异。** 接入 Metal surface，修正顶点 stride 与 GPU buffer 生命周期问题。
+6. **用证据推进。** 先跑合成测试和小范围差分，再看实机画面、操作、完整对局与长时间运行。
+
+[研究方法](docs/METHOD.md) · [架构](docs/ARCHITECTURE.md) · [移植经验](docs/PORTING-NOTES.md)
+
+## 仓库里有什么
+
+| 路径 | 内容 |
+| --- | --- |
+| [`tools/resources/`](tools/resources/) | BIG / CSF 读写、RefPack 解压、SkuDef 配置链解析；不附资源 |
+| [`tools/versions/`](tools/versions/) | 本地 Steam depot manifest 解析，不访问账号或服务 |
+| [`tools/lift/`](tools/lift/) | 原子操作与 SSE lifter 扩展、setjmp / longjmp 转换、PE32 导入查看 |
+| [`runtime/hle/`](runtime/hle/) | UDP 局域网发现传输、UTF-16 路径组合 |
+| [`hosts/`](hosts/) | CUR / ANI 光标解码、Apple Bonjour 与 Android NSD 桥接 |
+| [`tools/dxvk/`](tools/dxvk/) | **14 个平台补丁**、外部目录构建脚本、iOS stride 回归检查 |
+| [`tools/moltenvk/`](tools/moltenvk/) | iOS GPU buffer 生命周期补丁、构建脚本、原生 Metal 探针 |
+| [`cmake/`](cmake/) · [`examples/`](examples/) | Dev / Release 构建配置与独立示例 |
+| [`tests/`](tests/) · [`tools/shotdiff.py`](tools/shotdiff.py) | 合成回归测试、图像差异统计与公开内容检查 |
+
+源码、脚本与方法会继续整理公开。完整宿主集成和部分运行时依赖尚未包含；各组件的可运行范围写在 [工具指南](docs/TOOLS.md)，逐文件来源见 [PUBLICATION.json](PUBLICATION.json)。
+
+## 后续方向
+
+- 完成 Android、macOS、iPad 的整局与长时间回归。
+- 验证跨平台联机同步，并单独检查与原版 Windows 的互通。
+- 继续处理 ARM64 内存语义、图形兼容与资源生命周期。
+- 继续拆出可复用的原创运行时和测试工具，补齐公开组件之间的集成。
 
 ## 许可与致谢
 
-本仓库发布的代码和文档使用 [MIT License](LICENSE)，允许按该许可使用、修改和再分发。MIT 不授予任何游戏、游戏资源或第三方软件的权利，也不附加“仅非商业使用”的限制。
+原创代码和文档使用 **[MIT License](LICENSE)**。DXVK 补丁保留 zlib/libpng 许可，MoltenVK 补丁保留 Apache-2.0 许可；完整声明见 [THIRD_PARTY.md](THIRD_PARTY.md) 与 [LICENSES/](LICENSES/)。游戏画面与相关商标归各自权利人所有，本项目与 Electronic Arts 无隶属或赞助关系。[公开范围](LEGAL.md) · [贡献指南](CONTRIBUTING.md)。
 
-说明组织方式参考了 [HolyCaonima/sc2-android-recomp](https://github.com/HolyCaonima/sc2-android-recomp) 对方法、工具和游戏派生物的区分；本文为重新撰写，没有复制其源码或文档段落。研究涉及的外部项目见 [致谢与来源](THIRD_PARTY.md)。
-
-Command & Conquer、Red Alert 3 及相关名称、标识的权利属于各自权利人。本项目独立维护，未获 Electronic Arts 或其他权利人的认可或赞助。公开边界和贡献要求见 [LEGAL.md](LEGAL.md) 与 [CONTRIBUTING.md](CONTRIBUTING.md)。
+README 的组织方式参考 **[elkir0/sc2-android-recomp](https://github.com/elkir0/sc2-android-recomp)**。感谢原作者 elkir0 公开其静态重编译方法与工程经验，以及 [pcrecomp](https://github.com/sp00nznet/pcrecomp)、[DXVK](https://github.com/doitsujin/dxvk)、[MoltenVK](https://github.com/KhronosGroup/MoltenVK) 等上游项目。

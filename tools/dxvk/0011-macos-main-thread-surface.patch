@@ -1,0 +1,41 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+--- a/src/wsi/sdl2/wsi_window_sdl2.cpp
++++ b/src/wsi/sdl2/wsi_window_sdl2.cpp
+@@ -10,6 +10,11 @@
+ 
+ #include <windows.h>
+ #include <SDL_vulkan.h>
++
++#ifdef __APPLE__
++#include <dispatch/dispatch.h>
++#include <pthread.h>
++#endif
+ 
+ namespace dxvk::wsi {
+ 
+@@ -176,6 +181,24 @@
+           VkSurfaceKHR*             pSurface) {
+     SDL_Window* window = fromHwnd(hWindow);
+ 
++#ifdef __APPLE__
++    // SDL creates and attaches an NSView here. Cocoa requires that work on the
++    // main thread even when D3D9 and Vulkan rendering run on a game worker.
++    if (!pthread_main_np()) {
++      struct Request {
++        pfn_SDL_Vulkan_CreateSurface create;
++        SDL_Window* window;
++        VkInstance instance;
++        VkSurfaceKHR* surface;
++        SDL_bool success;
++      } request = { SDL_Vulkan_CreateSurface, window, instance, pSurface, SDL_FALSE };
++      dispatch_sync_f(dispatch_get_main_queue(), &request, [](void* context) {
++        auto& r = *static_cast<Request*>(context);
++        r.success = r.create(r.window, r.instance, r.surface);
++      });
++      return request.success ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
++    }
++#endif
+     return SDL_Vulkan_CreateSurface(window, instance, pSurface)
+          ? VK_SUCCESS
+          : VK_ERROR_OUT_OF_HOST_MEMORY;

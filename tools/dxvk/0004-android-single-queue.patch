@@ -1,0 +1,23 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -717,6 +717,17 @@
+     if (m_queueMapping.transfer.family == VK_QUEUE_FAMILY_IGNORED)
+       m_queueMapping.transfer.family = computeQueue;
+ 
++#ifdef __ANDROID__
++    // RA3 diagnostic: isolate dedicated-transfer/ownership failures without
++    // changing the normal queue selection or hiding unsupported features.
++    if (env::getEnvVar("RA3_DXVK_SINGLE_QUEUE") == "1") {
++      Logger::warn(str::format("RA3_DXVK_SINGLE_QUEUE=1: transfer queue family ",
++        m_queueMapping.transfer.family, " -> graphics family ",
++        m_queueMapping.graphics.family));
++      m_queueMapping.transfer.family = m_queueMapping.graphics.family;
++    }
++#endif
++
+     // Prefer using the graphics queue as a sparse binding queue if possible
+     auto& graphicsQueue = m_queuesAvailable[m_queueMapping.graphics.family].core;
+ 

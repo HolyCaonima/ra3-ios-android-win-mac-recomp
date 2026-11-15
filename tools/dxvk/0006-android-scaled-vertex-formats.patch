@@ -1,0 +1,160 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+--- a/src/dxvk/dxvk_graphics.cpp
++++ b/src/dxvk/dxvk_graphics.cpp
+@@ -7,6 +7,26 @@
+ #include "dxvk_pipemanager.h"
+ 
+ namespace dxvk {
++
++  // RA3: mobile GPUs may lack scaled integer vertex formats. Keep the same
++  // bytes/stride, fetch integers, and convert in the specialized vertex shader.
++  static VkFormat androidVertexFormat(const DxvkDevice* device, VkFormat format) {
++#ifdef __ANDROID__
++    if (device->getFormatFeatures(format).buffer & VK_FORMAT_FEATURE_2_VERTEX_BUFFER_BIT)
++      return format;
++    VkFormat fallback = format;
++    switch (format) {
++      case VK_FORMAT_R8G8B8A8_USCALED: fallback = VK_FORMAT_R8G8B8A8_UINT; break;
++      case VK_FORMAT_R16G16_SSCALED: fallback = VK_FORMAT_R16G16_SINT; break;
++      case VK_FORMAT_R16G16B16A16_SSCALED: fallback = VK_FORMAT_R16G16B16A16_SINT; break;
++      default: break;
++    }
++    if (device->getFormatFeatures(fallback).buffer & VK_FORMAT_FEATURE_2_VERTEX_BUFFER_BIT)
++      return fallback;
++#endif
++    return format;
++  }
++
+ 
+   VkPrimitiveTopology determineGsInputTopology(
+           VkPrimitiveTopology            shader,
+@@ -133,7 +153,14 @@
+         VkVertexInputAttributeDescription& attr = viAttributes[attrCount++];
+         attr.location = state.ilAttributes[i].location();
+         attr.binding = viBindingMap[state.ilAttributes[i].binding()];
+-        attr.format = state.ilAttributes[i].format();
++        auto originalFormat = state.ilAttributes[i].format();
++        attr.format = androidVertexFormat(device, originalFormat);
++        if (attr.format != originalFormat) {
++          if (originalFormat == VK_FORMAT_R8G8B8A8_USCALED)
++            viScaledUnsigned |= 1u << attr.location;
++          else
++            viScaledSigned |= 1u << attr.location;
++        }
+         attr.offset = state.ilAttributes[i].offset();
+       }
+     }
+@@ -1230,6 +1257,11 @@
+     if (!m_device->canUseGraphicsPipelineLibrary())
+       return false;
+ 
++    // A library shader has no vertex layout; conversions require specialization.
++    for (uint32_t i = 0; i < state.il.attributeCount(); i++)
++      if (androidVertexFormat(m_device, state.ilAttributes[i].format()) != state.ilAttributes[i].format())
++        return false;
++
+     // We do not implement setting certain rarely used render
+     // states dynamically since they are generally not used
+     bool isLineRendering = DxvkGraphicsPipelinePreRasterizationState::isLineRendering(m_shaders, state);
+--- a/src/dxvk/dxvk_graphics.h
++++ b/src/dxvk/dxvk_graphics.h
+@@ -59,6 +59,8 @@
+     std::array<VkVertexInputAttributeDescription,         MaxNumVertexAttributes> viAttributes  = { };
+ 
+     VkBool32 viUseDynamicVertexStrides = VK_FALSE;
++    uint32_t viScaledSigned = 0;
++    uint32_t viScaledUnsigned = 0;
+ 
+     bool eq(const DxvkGraphicsPipelineVertexInputState& other) const;
+ 
+@@ -438,7 +440,10 @@
+       prState(device, state, shaders),
+       fsState(device, state),
+       foState(device, state, shaders),
+-      scState(specConstantMask, state.sc) { }
++      scState(specConstantMask, state.sc) {
++      shState.vsInfo.vsScaledSigned = viState.viScaledSigned;
++      shState.vsInfo.vsScaledUnsigned = viState.viScaledUnsigned;
++    }
+ 
+     DxvkGraphicsPipelineShaderState           shState;
+     DxvkGraphicsPipelineDynamicState          dyState;
+--- a/src/dxvk/dxvk_shader.h
++++ b/src/dxvk/dxvk_shader.h
+@@ -201,6 +201,8 @@
+    * \brief Shader module create info
+    */
+   struct DxvkShaderLinkage {
++    uint32_t vsScaledSigned = 0;
++    uint32_t vsScaledUnsigned = 0;
+     bool fsDualSrcBlend  = false;
+     bool fsFlatShading   = false;
+     bool sampleLocations = false;
+--- a/src/dxvk/dxvk_shader.cpp
++++ b/src/dxvk/dxvk_shader.cpp
+@@ -15,7 +15,9 @@
+ 
+ 
+   bool DxvkShaderLinkage::eq(const DxvkShaderLinkage& other) const {
+-    bool eq = fsDualSrcBlend  == other.fsDualSrcBlend
++    bool eq = vsScaledSigned == other.vsScaledSigned
++           && vsScaledUnsigned == other.vsScaledUnsigned
++           && fsDualSrcBlend  == other.fsDualSrcBlend
+            && fsFlatShading   == other.fsFlatShading
+            && sampleLocations == other.sampleLocations
+            && semanticIo      == other.semanticIo;
+@@ -40,6 +42,8 @@
+ 
+   size_t DxvkShaderLinkage::hash() const {
+     DxvkHashState hash;
++    hash.add(vsScaledSigned);
++    hash.add(vsScaledUnsigned);
+     hash.add(uint32_t(fsDualSrcBlend));
+     hash.add(uint32_t(fsFlatShading));
+     hash.add(uint32_t(sampleLocations));
+--- a/src/dxvk/dxvk_shader_ir.cpp
++++ b/src/dxvk/dxvk_shader_ir.cpp
+@@ -2087,6 +2087,42 @@
+     }
+ 
+ #ifdef __ANDROID__
++    if (linkage && m_metadata.stage == VK_SHADER_STAGE_VERTEX_BIT &&
++        (linkage->vsScaledSigned | linkage->vsScaledUnsigned)) {
++      using namespace dxbc_spv;
++      std::vector<ir::SsaDef> inputs;
++      for (auto it = irBuilder.begin(); it != irBuilder.getDeclarations().second; ++it)
++        if (it->getOpCode() == ir::OpCode::eDclInput)
++          inputs.push_back(it->getDef());
++      for (auto def : inputs) {
++        auto decl = irBuilder.getOp(def);
++        uint32_t location = uint32_t(decl.getOperand(1u));
++        if (location >= 32u || !((linkage->vsScaledSigned | linkage->vsScaledUnsigned) & (1u << location)))
++          continue;
++        auto scalar = (linkage->vsScaledSigned & (1u << location))
++          ? ir::ScalarType::eI32 : ir::ScalarType::eU32;
++        auto oldType = decl.getType();
++        if (oldType.getBaseType(0u).getBaseType() != ir::ScalarType::eF32)
++          throw DxvkError("RA3: scaled vertex input is not float");
++        ir::Type integerType;
++        for (uint32_t i = 0; i < oldType.getStructMemberCount(); i++)
++          integerType.addStructMember(ir::BasicType(scalar, oldType.getBaseType(i).getVectorSize()));
++        for (uint32_t i = 0; i < oldType.getArrayDimensions(); i++)
++          integerType.addArrayDimension(oldType.getArraySize(i));
++        std::vector<ir::SsaDef> uses;
++        irBuilder.getUses(def, uses);
++        irBuilder.rewriteOp(def, ir::Op(decl).setType(integerType));
++        for (auto use : uses) {
++          auto load = irBuilder.getOp(use);
++          if (load.getOpCode() != ir::OpCode::eInputLoad)
++            continue;
++          auto loadType = ir::BasicType(scalar, load.getType().getBaseType(0u).getVectorSize());
++          auto integerLoad = irBuilder.addBefore(use, ir::Op(load).setType(loadType));
++          irBuilder.rewriteOp(use, ir::Op::ConvertItoF(load.getType(), integerLoad));
++        }
++      }
++    }
++
+     // RA3: optimized pipelines already key on all specialization values.
+     // Resolve their U32 state in IR, then discard inactive sampler branches
+     // before the Android driver sees them. Library shaders remain dynamic.

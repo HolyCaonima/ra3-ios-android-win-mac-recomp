@@ -7,6 +7,7 @@ work/
 *.log
 *.png
 *.jpg
+!docs/images/*.jpg
 *.bmp
 *.zip
 *.exe

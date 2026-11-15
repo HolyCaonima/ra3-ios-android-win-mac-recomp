@@ -1,0 +1,25 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+--- a/src/dxvk/dxvk_presenter.cpp
++++ b/src/dxvk/dxvk_presenter.cpp
+@@ -780,6 +780,20 @@
+     swapInfo.presentMode            = m_presentMode;
+     swapInfo.clipped                = VK_TRUE;
+ 
++#ifdef __ANDROID__
++    // Android surfaces may support only INHERIT (VUID compositeAlpha-01280).
++    // Keep OPAQUE when available, otherwise choose an advertised mode.
++    for (auto alpha : { VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
++                       VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
++                       VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
++                       VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR }) {
++      if (caps.surfaceCapabilities.supportedCompositeAlpha & alpha) {
++        swapInfo.compositeAlpha = alpha;
++        break;
++      }
++    }
++#endif
++
+     if (m_device->features().khrSwapchainMutableFormat && formatList.viewFormatCount) {
+       swapInfo.flags |= VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
+       formatList.pNext = std::exchange(swapInfo.pNext, &formatList);

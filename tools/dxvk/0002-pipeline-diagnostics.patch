@@ -1,0 +1,63 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+--- a/src/dxvk/dxvk_android_compat.cpp
++++ b/src/dxvk/dxvk_android_compat.cpp
+@@ -1,4 +1,7 @@
+ #include <vector>
++#include <atomic>
++#include <cstdio>
++#include <cstdlib>
+ 
+ #include "dxvk_android_compat.h"
+ 
+@@ -68,6 +71,42 @@
+   }
+ 
+ 
++  // Opt-in capture of the actual pipeline inputs, including specialization.
++  // Shader dumps from DxvkIrShader::dump use the unspecialized library path.
++  static void dumpStage(const VkPipelineShaderStageCreateInfo& stage,
++                        const VkShaderModuleCreateInfo& info) {
++    const char* path = std::getenv("RA3_DXVK_PIPELINE_DUMP");
++    if (!path || !*path)
++      return;
++    static std::atomic<uint32_t> next = { 0u };
++    uint32_t id = next.fetch_add(1u);
++    if (id >= 128u)
++      return;
++    char name[1024];
++    std::snprintf(name, sizeof(name), "%s/pipeline-%03u-stage%u.spv", path, id, uint32_t(stage.stage));
++    if (auto f = std::fopen(name, "wb")) {
++      std::fwrite(info.pCode, 1u, info.codeSize, f);
++      std::fclose(f);
++    }
++    std::snprintf(name, sizeof(name), "%s/pipeline-%03u-stage%u.spec", path, id, uint32_t(stage.stage));
++    if (auto f = std::fopen(name, "w")) {
++      if (stage.pSpecializationInfo) {
++        const auto& spec = *stage.pSpecializationInfo;
++        for (uint32_t i = 0; i < spec.mapEntryCount; i++) {
++          const auto& entry = spec.pMapEntries[i];
++          if (entry.size == sizeof(uint32_t) && entry.offset + entry.size <= spec.dataSize) {
++            uint32_t value;
++            std::memcpy(&value, static_cast<const char*>(spec.pData) + entry.offset, sizeof(value));
++            std::fprintf(f, "%u %u\n", entry.constantID, value);
++          }
++        }
++      }
++      std::fclose(f);
++    }
++    std::fprintf(stderr, "[ra3-vk] captured stage %u id %u (%zu bytes)\n", uint32_t(stage.stage), id, info.codeSize);
++  }
++
++
+   // Replaces an inline VkShaderModuleCreateInfo with a module made for it.
+   static VkResult fixStage(VkDevice device, VkPipelineShaderStageCreateInfo& stage,
+           ChainEdits& edits, std::vector<VkShaderModule>& made) {
+@@ -82,6 +121,7 @@
+ 
+     VkShaderModuleCreateInfo info = *inl;
+     info.pNext = nullptr;
++    dumpStage(stage, info);
+ 
+     VkShaderModule module = VK_NULL_HANDLE;
+     VkResult vr = s_createShaderModule(device, &info, nullptr, &module);

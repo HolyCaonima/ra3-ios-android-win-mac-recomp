@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 import json
+import hashlib
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +13,19 @@ import publication_guard as guard
 
 
 class BlobTests(unittest.TestCase):
+    def test_only_exact_reviewed_screenshot_is_allowed(self):
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 4), (30, 60, 90)).save(buffer, format="JPEG")
+        data = buffer.getvalue()
+        path = "docs/images/synthetic.jpg"
+        images = {path: hashlib.sha256(data).hexdigest()}
+        self.assertEqual(guard.inspect_blob(path, data, "100644", {path}, images), [])
+        self.assertTrue(guard.inspect_blob(path, data + b"extra", "100644", {path}, images))
+        self.assertTrue(guard.inspect_blob(path, data, "100644", {path}))
+        self.assertTrue(guard.inspect_blob("docs/images/other.jpg", data, "100644", {path}, images))
+        self.assertTrue(guard.inspect_blob(path, data, "120000", {path}, images))
+
     def test_safe_text_and_unknown_path(self):
         self.assertEqual(guard.inspect_blob("note.md", b"original prose\n", "100644", {"note.md"}), [])
         self.assertTrue(guard.inspect_blob("extra.md", b"text", "100644", {"note.md"}))
@@ -123,6 +138,22 @@ class RepositoryTests(unittest.TestCase):
             self.write_inventory(paths)
             with self.assertRaises(ValueError):
                 guard.inventory(self.root)
+
+    def test_image_review_requires_source_hash_and_rights(self):
+        document = json.loads((self.root / "PUBLICATION.json").read_text())
+        entry = {"path": "docs/images/synthetic.jpg", "kind": "documentation-screenshot",
+                 "provenance": "Synthetic test", "sha256": "0" * 64,
+                 "source": "https://www.bilibili.com/video/BVsynthetic/",
+                 "timestamp_seconds": 1,
+                 "rights": "Documentation only; game imagery excluded from MIT"}
+        document["files"].append(entry)
+        manifest = self.root / "PUBLICATION.json"
+        manifest.write_text(json.dumps(document))
+        self.assertEqual(guard.reviewed_images(self.root), {entry["path"]: "0" * 64})
+        del entry["rights"]
+        manifest.write_text(json.dumps(document))
+        with self.assertRaises(ValueError):
+            guard.reviewed_images(self.root)
 
     def test_shallow_history_fails_closed(self):
         self.git("commit", "-qm", "Synthetic baseline")

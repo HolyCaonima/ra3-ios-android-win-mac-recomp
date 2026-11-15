@@ -6,6 +6,7 @@ commit. --history: inspect all snapshots reachable from local Git refs and HEAD.
 Always use the current reviewed inventory, including for historical snapshots.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -48,7 +49,29 @@ def inventory(root):
     return allowed
 
 
-def inspect_blob(path, data, mode, allowed):
+def reviewed_images(root):
+    """Only individually reviewed JPEG bytes are exempt from text checks."""
+    document = json.loads((root / "PUBLICATION.json").read_text(encoding="utf-8"))
+    images = {}
+    for entry in document["files"]:
+        if entry.get("kind") != "documentation-screenshot":
+            continue
+        path = entry["path"]
+        digest = entry.get("sha256", "")
+        if (not re.fullmatch(r"docs/images/[a-z0-9-]+\.jpg", path)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or not re.fullmatch(r"https://www\.bilibili\.com/video/BV[A-Za-z0-9]+/", entry.get("source", ""))
+                or not isinstance(entry.get("timestamp_seconds"), (int, float))
+                or entry["timestamp_seconds"] < 0
+                or entry.get("rights") != "Documentation only; game imagery excluded from MIT"):
+            raise ValueError("incomplete screenshot review record")
+        images[path] = digest
+    if len(images) > 6:
+        raise ValueError("too many documentation screenshots")
+    return images
+
+
+def inspect_blob(path, data, mode, allowed, images=None):
     problems = []
     if path not in allowed:
         problems.append("path is not in reviewed inventory")
@@ -56,6 +79,12 @@ def inspect_blob(path, data, mode, allowed):
         problems.append("symlink, submodule or unsupported file mode")
     if len(data) > MAX_BYTES:
         problems.append("file exceeds public size limit")
+    if path in (images or {}):
+        if hashlib.sha256(data).hexdigest() != images[path]:
+            problems.append("screenshot differs from reviewed SHA-256")
+        if not data.startswith(b"\xff\xd8\xff") or not data.endswith(b"\xff\xd9"):
+            problems.append("reviewed screenshot must be a complete JPEG")
+        return problems
     if data.startswith(MAGIC):
         problems.append("binary/archive signature")
     if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
@@ -113,11 +142,11 @@ def git_entries(root, commit=None):
         yield path.decode("utf-8"), data, mode
 
 
-def check_entries(entries, allowed, require_complete=False):
+def check_entries(entries, allowed, require_complete=False, images=None):
     problems, seen = [], set()
     for path, data, mode in entries:
         seen.add(path)
-        for reason in inspect_blob(path, data, mode, allowed):
+        for reason in inspect_blob(path, data, mode, allowed, images):
             # Report paths/reasons only, never print matching sensitive content.
             problems.append(f"{path!r}: {reason}")
     if require_complete:
@@ -125,7 +154,7 @@ def check_entries(entries, allowed, require_complete=False):
     return problems
 
 
-def check_history(root, allowed):
+def check_history(root, allowed, images=None):
     if git(root, "rev-parse", "--is-shallow-repository").strip() == b"true":
         raise ValueError("shallow history: fetch full history before publication")
     heads = ["--all"]
@@ -139,12 +168,11 @@ def check_history(root, allowed):
     for commit in commits:
         for path, data, mode in git_entries(root, commit):
             # Hash content locally only to avoid repeated pattern work.
-            import hashlib
             identity = (path, mode, hashlib.sha256(data).digest())
             if identity in checked:
                 continue
             checked.add(identity)
-            for reason in inspect_blob(path, data, mode, allowed):
+            for reason in inspect_blob(path, data, mode, allowed, images):
                 problems.append(f"{commit[:12]}:{path!r}: {reason}")
     return problems
 
@@ -159,11 +187,12 @@ def main():
     root = args.root.resolve()
     try:
         allowed = inventory(root)
+        images = reviewed_images(root)
         if args.history:
-            problems = check_history(root, allowed)
+            problems = check_history(root, allowed, images)
         else:
             entries = git_entries(root) if args.index else working_entries(root)
-            problems = check_entries(entries, allowed, require_complete=True)
+            problems = check_entries(entries, allowed, require_complete=True, images=images)
         if problems:
             print("Publication check failed:")
             print("\n".join(problems))

@@ -1,8 +1,12 @@
 {
   "schema": 1,
   "review_date": "2026-11-15",
-  "scope": "Selected public documentation and generic tools only; no private history or game-derived artifacts.",
+  "scope": "Original tools, lifter extensions, runtime components and platform patches; upstream licenses retained. Four documentary stills. No game resources, generated lift C, proprietary binaries, private history or credentials.",
   "files": [
+    {
+      "path": ".gitattributes",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
     {
       "path": ".githooks/pre-commit",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
@@ -34,6 +38,22 @@
     {
       "path": "LICENSE",
       "provenance": "Standard MIT license text; project copyright notice."
+    },
+    {
+      "path": "LICENSES/DXVK.txt",
+      "provenance": "Unmodified upstream license notice for the named external project."
+    },
+    {
+      "path": "LICENSES/MoltenVK-NOTICE.txt",
+      "provenance": "Upstream per-file copyright/license notices and explicit project modification record."
+    },
+    {
+      "path": "LICENSES/MoltenVK.txt",
+      "provenance": "Unmodified upstream license notice for the named external project."
+    },
+    {
+      "path": "LICENSES/pcrecomp.txt",
+      "provenance": "Unmodified upstream license notice for the named external project."
     },
     {
       "path": "PUBLICATION.json",
@@ -80,36 +100,248 @@
       "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
     },
     {
+      "path": "docs/SCREENSHOTS.md",
+      "provenance": "Newly authored source, timestamp and rights record for maintainer-authorized stills from public progress videos."
+    },
+    {
       "path": "docs/STATUS.md",
       "provenance": "Newly authored for this public release; documentation summarizes engineering observations without private artifacts."
+    },
+    {
+      "path": "docs/TOOLS.md",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
+      "path": "docs/images/android-battlefield.jpg",
+      "kind": "documentation-screenshot",
+      "provenance": "Browser-captured still from maintainer-owned public Bilibili progress video; framing cropped and visually reviewed.",
+      "source": "https://www.bilibili.com/video/BV1qDsE67ECV/",
+      "timestamp_seconds": 124.93485,
+      "rights": "Documentation only; game imagery excluded from MIT",
+      "sha256": "41875d59ded5ba7c9fe197b45accc65ae60d097572a47c28b316a59271143a38"
+    },
+    {
+      "path": "docs/images/ipad-campaign.jpg",
+      "kind": "documentation-screenshot",
+      "provenance": "Browser-captured still from maintainer-owned public Bilibili progress video; framing cropped and visually reviewed.",
+      "source": "https://www.bilibili.com/video/BV1E7sV6vEfn/",
+      "timestamp_seconds": 246.344557,
+      "rights": "Documentation only; game imagery excluded from MIT",
+      "sha256": "62f1cfcd168276608949c7f863a636f89b539c707902d9147f8d514822e05836"
+    },
+    {
+      "path": "docs/images/ipad-macos-lan.jpg",
+      "kind": "documentation-screenshot",
+      "provenance": "Browser-captured still from maintainer-owned public Bilibili progress video; framing cropped and visually reviewed.",
+      "source": "https://www.bilibili.com/video/BV1tZsH6gEGb/",
+      "timestamp_seconds": 97.828593,
+      "rights": "Documentation only; game imagery excluded from MIT",
+      "sha256": "87c88c041fb53c9734a3b61634d4583aa95e82f4b0c1db220ae43a7f860fafe3"
+    },
+    {
+      "path": "docs/images/macos-battlefield.jpg",
+      "kind": "documentation-screenshot",
+      "provenance": "Browser-captured still from maintainer-owned public Bilibili progress video; framing cropped and visually reviewed.",
+      "source": "https://www.bilibili.com/video/BV1jws56vE25/",
+      "timestamp_seconds": 149.8459,
+      "rights": "Documentation only; game imagery excluded from MIT",
+      "sha256": "89adcfd1a86f9109d1f18941195adc59cb936f222b69da81321c978d5f9bf04c"
     },
     {
       "path": "examples/build-profile/CMakeLists.txt",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
     },
     {
+      "path": "hosts/android/bonjour.c",
+      "provenance": "Project-authored source from liftingCPath/hosts/android/bonjour.c; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "hosts/android/java/com/revra3/ra3/BonjourDiscovery.java",
+      "provenance": "Project-authored source from liftingCPath/hosts/android/java/com/revra3/ra3/BonjourDiscovery.java; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "hosts/apple/bonjour.c",
+      "provenance": "Project-authored source from liftingCPath/hosts/apple/bonjour.c; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "hosts/macos/cursor_image.c",
+      "provenance": "Project-authored source from liftingCPath/hosts/macos/cursor_image.c; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "hosts/macos/cursor_image.h",
+      "provenance": "Project-authored source from liftingCPath/hosts/macos/cursor_image.h; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
       "path": "requirements.txt",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "runtime/hle/lan_discovery.c",
+      "provenance": "Project-authored source from liftingCPath/runtime/hle/lan_discovery.c; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "runtime/hle/lan_discovery.h",
+      "provenance": "Project-authored source from liftingCPath/runtime/hle/lan_discovery.h; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "runtime/hle/path_combine.h",
+      "provenance": "Project-authored source from liftingCPath/runtime/hle/path_combine.h; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tests/test_native.py",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
     },
     {
       "path": "tests/test_publication_guard.py",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
     },
     {
+      "path": "tests/test_resources.py",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
       "path": "tests/test_tools.py",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tools/dxvk/0001-android-optional-extensions.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0002-pipeline-diagnostics.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0003-android-specialize-samplers.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0004-android-single-queue.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0005-android-composite-alpha.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0006-android-scaled-vertex-formats.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0007-android-aspect-ratio.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0008-macos-moltenvk.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0009-swvp-geometry-capability.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0010-apple-specialize-samplers.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0011-macos-main-thread-surface.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0012-ios-metal-wsi.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0013-ios-capability-diagnostics.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/0014-ios-static-vertex-strides.patch",
+      "provenance": "Project modifications and upstream DXVK patch context (zlib/libpng license); upstream notices retained in LICENSES/DXVK.txt; no game shaders or binaries."
+    },
+    {
+      "path": "tools/dxvk/README.md",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
+      "path": "tools/dxvk/build.py",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
+      "path": "tools/dxvk/test_ios_vertex_strides.cpp",
+      "provenance": "Project-authored source from liftingCPath/tools/dxvk/test_ios_vertex_strides.cpp; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/dxvk/test_ios_vertex_strides.py",
+      "provenance": "Project regression runner adapted to accept an explicit external compile_commands.json and system temporary directory."
+    },
+    {
+      "path": "tools/lift/lift32_atomic_ra3.py",
+      "provenance": "Project-authored source from liftingCPath/tools/lift/lift32_atomic_ra3.py; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/lift/lift32_sse_ra3.py",
+      "provenance": "Project-authored source from liftingCPath/tools/lift/lift32_sse_ra3.py; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/lift/nonlocal_jumps.py",
+      "provenance": "Project generic nonlocal-control-flow transform; removed game image adapter and private CLI dependency. Requires caller-provided PE adapter and runtime hooks; no generated functions included."
+    },
+    {
+      "path": "tools/lift/peimports.py",
+      "provenance": "Project-authored source from liftingCPath/tools/lift/peimports.py; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/macos/test_cursors.c",
+      "provenance": "Project cursor tests; retained synthetic cases only, removed game-asset fixture loop."
+    },
+    {
+      "path": "tools/moltenvk/0001-ios-retain-addressable-residency.patch",
+      "provenance": "Project modification of MoltenVK; patch context remains Apache-2.0. Copyright and modification notices in LICENSES/MoltenVK-NOTICE.txt."
+    },
+    {
+      "path": "tools/moltenvk/README.md",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
+      "path": "tools/moltenvk/build.sh",
+      "provenance": "Project tools/ios/build_moltenvk.sh adapted to explicit external source/build paths; no signing or game inputs."
+    },
+    {
+      "path": "tools/moltenvk/probe_metal_residency.mm",
+      "provenance": "Project-authored source from liftingCPath/tools/moltenvk/probe_metal_residency.mm; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/net/test_lan_discovery.c",
+      "provenance": "Project-authored source from liftingCPath/tools/net/test_lan_discovery.c; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
     },
     {
       "path": "tools/publication_guard.py",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
     },
     {
+      "path": "tools/resources/language_assets.py",
+      "provenance": "Project-authored source from liftingCPath/tools/android/language_assets.py; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
+    },
+    {
+      "path": "tools/resources/skudef.py",
+      "provenance": "Project contained-path and configuration-chain resolver extracted from tools/resources/configure_bundle.py. Removed private bundle layout, game version manifest and executable handling."
+    },
+    {
       "path": "tools/shotdiff.py",
       "provenance": "Project generic image-statistics tool, adapted with standalone CLI and synthetic validation."
     },
     {
+      "path": "tools/upstream.py",
+      "provenance": "New public documentation, packaging glue or synthetic test; no game inputs. Build/test flags adapted from the corresponding project tools where applicable."
+    },
+    {
       "path": "tools/verify.py",
       "provenance": "Newly authored public-release infrastructure or synthetic example/test."
+    },
+    {
+      "path": "tools/versions/steam_manifest.py",
+      "provenance": "Project-authored source from liftingCPath/tools/versions/steam_manifest.py; reviewed without game inputs or generated output; public packaging adaptations documented in docs/PUBLICATION.md."
     }
   ]
 }

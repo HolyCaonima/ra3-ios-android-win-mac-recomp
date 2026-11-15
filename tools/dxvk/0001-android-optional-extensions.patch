@@ -1,0 +1,1363 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+diff --git a/include/native/wsi/native_android.h b/include/native/wsi/native_android.h
+new file mode 100644
+index 0000000..da8b3f4
+--- /dev/null
++++ b/include/native/wsi/native_android.h
+@@ -0,0 +1,22 @@
++#pragma once
++
++/* RA3 (liftingCPath D007): the WSI handle on Android. There is one window at
++ * a time, an ANativeWindow that comes and goes with the activity; the HWND
++ * the game holds is a stable token, and the window behind it is swapped by
++ * the shell (dxvk_android_set_window, wsi_platform_android.cpp). */
++
++#include <windows.h>
++
++struct ANativeWindow;
++
++namespace dxvk::wsi {
++
++  inline HWND androidHwnd() {
++    return reinterpret_cast<HWND>(uintptr_t(0xA11D0001u));
++  }
++
++  inline bool isAndroidHwnd(HWND hWindow) {
++    return hWindow == androidHwnd();
++  }
++
++}
+diff --git a/include/native/wsi/native_wsi.h b/include/native/wsi/native_wsi.h
+index e5d7321..2a64103 100644
+--- a/include/native/wsi/native_wsi.h
++++ b/include/native/wsi/native_wsi.h
+@@ -2,6 +2,8 @@
+ 
+ #ifdef DXVK_WSI_WIN32
+ #error You shouldnt be using this code path.
++#elif DXVK_WSI_ANDROID
++#include "wsi/native_android.h"
+ #elif DXVK_WSI_SDL3
+ #include "wsi/native_sdl3.h"
+ #elif DXVK_WSI_SDL2
+diff --git a/meson.build b/meson.build
+index 4964301..3b74173 100644
+--- a/meson.build
++++ b/meson.build
+@@ -149,6 +149,10 @@ else
+     './include/native/directx'
+   ]
+ 
++  if get_option('native_android')
++    compiler_args += ['-DDXVK_WSI_ANDROID']
++  endif
++
+   lib_sdl3 = dependency('sdl3', required: get_option('native_sdl3'))
+   lib_sdl2 = dependency('sdl2', required: get_option('native_sdl2'))
+   lib_glfw = dependency('glfw3', required: get_option('native_glfw'))
+@@ -161,7 +165,7 @@ else
+   if lib_glfw.found()
+     compiler_args += ['-DDXVK_WSI_GLFW']
+   endif
+-  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found())
++  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found() and not get_option('native_android'))
+     error('SDL3, SDL2, or GLFW are required to build dxvk-native')
+   endif
+   
+diff --git a/meson_options.txt b/meson_options.txt
+index 98851af..a518c02 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -4,6 +4,7 @@ option('enable_d3d9',  type : 'boolean', value : true, description: 'Build D3D9'
+ option('enable_d3d10', type : 'boolean', value : true, description: 'Build D3D10')
+ option('enable_d3d11', type : 'boolean', value : true, description: 'Build D3D11')
+ option('build_id',     type : 'boolean', value : false)
++option('native_android', type : 'boolean', value : false, description: 'RA3: Android WSI for DXVK Native (ANativeWindow)')
+ option('native_glfw',  type : 'feature', value : 'auto', description: 'Enable GLFW WSI for DXVK Native')
+ option('native_sdl2',  type : 'feature', value : 'auto', description: 'Enable SDL2 WSI for DXVK Native')
+ option('native_sdl3',  type : 'feature', value : 'auto', description: 'Enable SDL3 WSI for DXVK Native')
+diff --git a/src/d3d9/d3d9.sym b/src/d3d9/d3d9.sym
+index bbfaee0..6e4e7a0 100644
+--- a/src/d3d9/d3d9.sym
++++ b/src/d3d9/d3d9.sym
+@@ -20,6 +20,9 @@
+     Direct3D9ForceHybridEnumeration;
+     Direct3DCreate9On12;
+     Direct3DCreate9On12Ex;
++    dxvk_android_set_window;
++    dxvk_android_window_generation;
++    dxvk_android_hwnd;
+ 
+   local:
+     *;
+diff --git a/src/dxvk/dxvk_adapter.cpp b/src/dxvk/dxvk_adapter.cpp
+index 96dfa5d..0c86c7f 100644
+--- a/src/dxvk/dxvk_adapter.cpp
++++ b/src/dxvk/dxvk_adapter.cpp
+@@ -2,6 +2,7 @@
+ #include <unordered_set>
+ 
+ #include "dxvk_adapter.h"
++#include "dxvk_android_compat.h"
+ #include "dxvk_device.h"
+ #include "dxvk_instance.h"
+ 
+@@ -297,6 +298,12 @@ namespace dxvk {
+ 
+     Rc<vk::DeviceFn> vkd = new vk::DeviceFn(vk, true, device);
+ 
++    // RA3: pipeline creation without VK_KHR_maintenance5 (dxvk_android_compat)
++    if (!caps.getFeatures().khrMaintenance5.maintenance5) {
++      Logger::info("Device lacks VK_KHR_maintenance5: using pipeline creation fallbacks");
++      android_compat::installPipelineFallbacks(*vkd);
++    }
++
+     DxvkDeviceQueueSet deviceQueues = { };
+     deviceQueues.graphics = getDeviceQueue(vkd, caps, queueMapping.graphics);
+     deviceQueues.transfer = getDeviceQueue(vkd, caps, queueMapping.transfer);
+diff --git a/src/dxvk/dxvk_android_compat.cpp b/src/dxvk/dxvk_android_compat.cpp
+new file mode 100644
+index 0000000..801f5ce
+--- /dev/null
++++ b/src/dxvk/dxvk_android_compat.cpp
+@@ -0,0 +1,173 @@
++#include <vector>
++
++#include "dxvk_android_compat.h"
++
++#include "dxvk_include.h"
++
++namespace dxvk::android_compat {
++
++  // One device per process in practice; the wrappers need the real entry points.
++  static PFN_vkCreateGraphicsPipelines s_createGraphicsPipelines = nullptr;
++  static PFN_vkCreateComputePipelines  s_createComputePipelines  = nullptr;
++  static PFN_vkCreateShaderModule      s_createShaderModule      = nullptr;
++  static PFN_vkDestroyShaderModule     s_destroyShaderModule     = nullptr;
++
++
++  /**
++   * \brief Structures unlinked from pNext chains for one call
++   *
++   * The chains are the caller's (DXVK's own locals); a structure the driver
++   * must not see is unlinked for the duration of the call and put back after,
++   * so nothing has to know the size of the structures to copy them.
++   */
++  class ChainEdits {
++
++  public:
++
++    ~ChainEdits() {
++      for (auto i = m_edits.rbegin(); i != m_edits.rend(); i++)
++        *i->link = i->node;
++    }
++
++    // Unlinks the first structure of the given type; returns it or null.
++    const VkBaseInStructure* unlink(const void** head, VkStructureType sType) {
++      auto link = reinterpret_cast<const VkBaseInStructure**>(head);
++
++      while (*link && (*link)->sType != sType)
++        link = const_cast<const VkBaseInStructure**>(&(*link)->pNext);
++
++      const VkBaseInStructure* node = *link;
++
++      if (node) {
++        m_edits.push_back({ link, node });
++        *link = node->pNext;
++      }
++
++      return node;
++    }
++
++  private:
++
++    struct Edit {
++      const VkBaseInStructure** link;
++      const VkBaseInStructure*  node;
++    };
++
++    std::vector<Edit> m_edits;
++
++  };
++
++
++  // Legacy flags from the flags2 struct in the chain, if any (the low
++  // 32 bits of the flags2 bits are the legacy bits by definition).
++  static VkPipelineCreateFlags takeFlags2(const void** pNext, ChainEdits& edits) {
++    auto f2 = reinterpret_cast<const VkPipelineCreateFlags2CreateInfo*>(
++      edits.unlink(pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO));
++
++    return f2 ? VkPipelineCreateFlags(f2->flags & 0xffffffffu) : 0u;
++  }
++
++
++  // Replaces an inline VkShaderModuleCreateInfo with a module made for it.
++  static VkResult fixStage(VkDevice device, VkPipelineShaderStageCreateInfo& stage,
++          ChainEdits& edits, std::vector<VkShaderModule>& made) {
++    if (stage.module)
++      return VK_SUCCESS;
++
++    auto inl = reinterpret_cast<const VkShaderModuleCreateInfo*>(
++      edits.unlink(&stage.pNext, VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO));
++
++    if (!inl)
++      return VK_SUCCESS;
++
++    VkShaderModuleCreateInfo info = *inl;
++    info.pNext = nullptr;
++
++    VkShaderModule module = VK_NULL_HANDLE;
++    VkResult vr = s_createShaderModule(device, &info, nullptr, &module);
++
++    if (vr)
++      return vr;
++
++    made.push_back(module);
++    stage.module = module;
++    return VK_SUCCESS;
++  }
++
++
++  static VKAPI_ATTR VkResult VKAPI_CALL createGraphicsPipelines(
++          VkDevice                          device,
++          VkPipelineCache                   cache,
++          uint32_t                          count,
++    const VkGraphicsPipelineCreateInfo*     pInfos,
++    const VkAllocationCallbacks*            pAllocator,
++          VkPipeline*                       pPipelines) {
++    // Stage arrays are copied (their module field changes); the create infos
++    // are copied too, and only their pNext chains are edited in place.
++    std::vector<VkGraphicsPipelineCreateInfo> infos(pInfos, pInfos + count);
++    std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stages(count);
++    std::vector<VkShaderModule> made;
++    ChainEdits edits;
++    VkResult vr = VK_SUCCESS;
++
++    for (uint32_t i = 0; i < count && !vr; i++) {
++      infos[i].flags |= takeFlags2(&infos[i].pNext, edits);
++
++      stages[i].assign(infos[i].pStages, infos[i].pStages + infos[i].stageCount);
++
++      for (auto& s : stages[i]) {
++        if ((vr = fixStage(device, s, edits, made)))
++          break;
++      }
++
++      infos[i].pStages = stages[i].data();
++    }
++
++    if (!vr)
++      vr = s_createGraphicsPipelines(device, cache, count, infos.data(), pAllocator, pPipelines);
++
++    for (auto m : made)
++      s_destroyShaderModule(device, m, nullptr);
++
++    return vr;
++  }
++
++
++  static VKAPI_ATTR VkResult VKAPI_CALL createComputePipelines(
++          VkDevice                          device,
++          VkPipelineCache                   cache,
++          uint32_t                          count,
++    const VkComputePipelineCreateInfo*      pInfos,
++    const VkAllocationCallbacks*            pAllocator,
++          VkPipeline*                       pPipelines) {
++    std::vector<VkComputePipelineCreateInfo> infos(pInfos, pInfos + count);
++    std::vector<VkShaderModule> made;
++    ChainEdits edits;
++    VkResult vr = VK_SUCCESS;
++
++    for (uint32_t i = 0; i < count && !vr; i++) {
++      infos[i].flags |= takeFlags2(&infos[i].pNext, edits);
++      vr = fixStage(device, infos[i].stage, edits, made);
++    }
++
++    if (!vr)
++      vr = s_createComputePipelines(device, cache, count, infos.data(), pAllocator, pPipelines);
++
++    for (auto m : made)
++      s_destroyShaderModule(device, m, nullptr);
++
++    return vr;
++  }
++
++
++  void installPipelineFallbacks(vk::DeviceFn& vkd) {
++    s_createGraphicsPipelines = vkd.vkCreateGraphicsPipelines;
++    s_createComputePipelines  = vkd.vkCreateComputePipelines;
++    s_createShaderModule      = vkd.vkCreateShaderModule;
++    s_destroyShaderModule     = vkd.vkDestroyShaderModule;
++
++    vkd.vkCreateGraphicsPipelines = &createGraphicsPipelines;
++    vkd.vkCreateComputePipelines  = &createComputePipelines;
++  }
++
++}
+diff --git a/src/dxvk/dxvk_android_compat.h b/src/dxvk/dxvk_android_compat.h
+new file mode 100644
+index 0000000..753f5fd
+--- /dev/null
++++ b/src/dxvk/dxvk_android_compat.h
+@@ -0,0 +1,20 @@
++#pragma once
++
++// RA3 (liftingCPath D007): fallbacks for drivers without VK_KHR_maintenance5,
++// as on Android's gfxstream and older Adreno/Mali drivers. Installed into the
++// device's dispatch table right after vkCreateDevice.
++
++#include "dxvk_include.h"
++
++namespace dxvk::android_compat {
++
++  /**
++   * \brief Wraps pipeline creation for a device without maintenance5
++   *
++   * Turns VkPipelineCreateFlags2CreateInfo into legacy pipeline flags (the
++   * low 32 bits mean the same) and VkShaderModuleCreateInfo chained into a
++   * stage into a real, temporary VkShaderModule.
++   */
++  void installPipelineFallbacks(vk::DeviceFn& vkd);
++
++}
+diff --git a/src/dxvk/dxvk_cmdlist.cpp b/src/dxvk/dxvk_cmdlist.cpp
+index 108ce64..c95c8ad 100644
+--- a/src/dxvk/dxvk_cmdlist.cpp
++++ b/src/dxvk/dxvk_cmdlist.cpp
+@@ -232,7 +232,9 @@ namespace dxvk {
+   : m_device        (device),
+     m_vkd           (device->vkd()),
+     m_vki           (device->vki()),
+-    m_checkpoints   (device->getCheckpointBuffer()) {
++    m_checkpoints   (device->getCheckpointBuffer()),
++    m_hasMaintenance5(device->features().khrMaintenance5.maintenance5),
++    m_hasMaintenance6(device->features().khrMaintenance6.maintenance6) {
+     const auto& graphicsQueue = m_device->queues().graphics;
+     const auto& transferQueue = m_device->queues().transfer;
+ 
+@@ -250,6 +252,20 @@ namespace dxvk {
+   DxvkCommandList::~DxvkCommandList() {
+     this->reset();
+   }
++
++
++  void DxvkCommandList::bindIndexBufferLegacy(
++          VkBuffer                buffer,
++          VkDeviceSize            offset,
++          VkIndexType             indexType) {
++    if (!buffer) {
++      auto dummy = m_device->m_objects.dummyResources().bufferInfo();
++      buffer = dummy.buffer;
++      offset = dummy.offset;
++    }
++
++    m_vkd->vkCmdBindIndexBuffer(getCmdBuffer(), buffer, offset, indexType);
++  }
+   
+   
+   VkResult DxvkCommandList::submit(
+diff --git a/src/dxvk/dxvk_cmdlist.h b/src/dxvk/dxvk_cmdlist.h
+index 38891eb..152ce7e 100644
+--- a/src/dxvk/dxvk_cmdlist.h
++++ b/src/dxvk/dxvk_cmdlist.h
+@@ -622,7 +622,25 @@ namespace dxvk {
+     void cmdBindDescriptorSets(
+             DxvkCmdBuffer             cmdBuffer,
+       const VkBindDescriptorSetsInfo* info) {
+-      m_vkd->vkCmdBindDescriptorSets2KHR(getCmdBuffer(cmdBuffer), info);
++      if (likely(m_hasMaintenance6)) {
++        m_vkd->vkCmdBindDescriptorSets2KHR(getCmdBuffer(cmdBuffer), info);
++        return;
++      }
++
++      // RA3: no maintenance6; one call per pipeline type the stages cover
++      VkCommandBuffer cmd = getCmdBuffer(cmdBuffer);
++
++      if (info->stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS) {
++        m_vkd->vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, info->layout,
++          info->firstSet, info->descriptorSetCount, info->pDescriptorSets,
++          info->dynamicOffsetCount, info->pDynamicOffsets);
++      }
++
++      if (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) {
++        m_vkd->vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, info->layout,
++          info->firstSet, info->descriptorSetCount, info->pDescriptorSets,
++          info->dynamicOffsetCount, info->pDynamicOffsets);
++      }
+     }
+ 
+ 
+@@ -638,8 +656,14 @@ namespace dxvk {
+             VkDeviceSize            offset,
+             VkDeviceSize            size,
+             VkIndexType             indexType) {
+-      m_vkd->vkCmdBindIndexBuffer2KHR(getCmdBuffer(),
+-        buffer, offset, size, indexType);
++      if (likely(m_hasMaintenance5)) {
++        m_vkd->vkCmdBindIndexBuffer2KHR(getCmdBuffer(),
++          buffer, offset, size, indexType);
++      } else {
++        // RA3: no maintenance5; the size limit only matters for robustness,
++        // and a null buffer becomes the zero-filled dummy buffer
++        bindIndexBufferLegacy(buffer, offset, indexType);
++      }
+     }
+ 
+ 
+@@ -1027,7 +1051,11 @@ namespace dxvk {
+     void cmdPushConstants(
+             DxvkCmdBuffer           cmdBuffer,
+       const VkPushConstantsInfo*    info) {
+-      m_vkd->vkCmdPushConstants2KHR(getCmdBuffer(cmdBuffer), info);
++      if (likely(m_hasMaintenance6))
++        m_vkd->vkCmdPushConstants2KHR(getCmdBuffer(cmdBuffer), info);
++      else  // RA3: no maintenance6
++        m_vkd->vkCmdPushConstants(getCmdBuffer(cmdBuffer), info->layout,
++          info->stageFlags, info->offset, info->size, info->pValues);
+     }
+ 
+ 
+@@ -1358,6 +1386,15 @@ namespace dxvk {
+     Rc<vk::DeviceFn>          m_vkd;
+     Rc<vk::InstanceFn>        m_vki;
+ 
++    // RA3: optional on Android drivers; the wrappers above fall back without them
++    bool                      m_hasMaintenance5 = true;
++    bool                      m_hasMaintenance6 = true;
++
++    void bindIndexBufferLegacy(
++            VkBuffer                buffer,
++            VkDeviceSize            offset,
++            VkIndexType             indexType);
++
+     DxvkCheckpointBuffer*     m_checkpoints = nullptr;
+     
+     Rc<DxvkCommandPool>       m_graphicsPool;
+diff --git a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+index 7c6a4c8..710f195 100644
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -36,6 +36,9 @@ namespace dxvk {
+ 
+       if (m_device->config().enableDescriptorUpdateTemplates)
+         m_features.set(DxvkContextFeature::DescriptorTemplates);
++
++      // RA3: no null descriptors on this device
++      m_nullFallback.needed = !device->features().extRobustness2.nullDescriptor;
+     }
+ 
+     // Init framebuffer info with default render pass in case
+@@ -1023,6 +1026,109 @@ namespace dxvk {
+   }
+ 
+ 
++  void DxvkContext::prepareNullFallback() {
++    if (likely(m_nullFallback.ready))
++      return;
++
++    m_nullFallback.ready = true;
++
++    static const VkImageType types[3] = { VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D };
++
++    for (uint32_t i = 0; i < 3; i++) {
++      DxvkImageCreateInfo info;
++      info.type        = types[i];
++      info.format      = VK_FORMAT_R8G8B8A8_UNORM;
++      info.flags       = i == 1 ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u;
++      info.sampleCount = VK_SAMPLE_COUNT_1_BIT;
++      info.extent      = { 1u, 1u, 1u };
++      info.numLayers   = i == 1 ? 6u : 1u;
++      info.mipLevels   = 1u;
++      info.usage       = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++      info.stages      = m_device->getShaderPipelineStages() | VK_PIPELINE_STAGE_TRANSFER_BIT;
++      info.access      = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
++      info.tiling      = VK_IMAGE_TILING_OPTIMAL;
++      info.layout      = VK_IMAGE_LAYOUT_GENERAL;     // good for sampled and storage reads
++      info.debugName   = "Null descriptor stand-in";
++
++      m_nullFallback.images[i] = m_device->createImage(info, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
++      initImage(m_nullFallback.images[i], VK_IMAGE_LAYOUT_UNDEFINED);
++    }
++
++    static const struct { VkImageViewType type; uint32_t image; uint16_t layers; } views[] = {
++      { VK_IMAGE_VIEW_TYPE_1D,         0u, 1u },
++      { VK_IMAGE_VIEW_TYPE_2D,         1u, 1u },
++      { VK_IMAGE_VIEW_TYPE_3D,         2u, 1u },
++      { VK_IMAGE_VIEW_TYPE_CUBE,       1u, 6u },
++      { VK_IMAGE_VIEW_TYPE_1D_ARRAY,   0u, 1u },
++      { VK_IMAGE_VIEW_TYPE_2D_ARRAY,   1u, 1u },
++      { VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, 1u, 6u },
++    };
++
++    for (const auto& v : views) {
++      DxvkImageViewKey key;
++      key.viewType   = v.type;
++      key.usage      = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
++      key.format     = VK_FORMAT_R8G8B8A8_UNORM;
++      key.layout     = VK_IMAGE_LAYOUT_GENERAL;
++      key.aspects    = VK_IMAGE_ASPECT_COLOR_BIT;
++      key.mipIndex   = 0u;
++      key.mipCount   = 1u;
++      key.layerIndex = 0u;
++      key.layerCount = v.layers;
++
++      m_nullFallback.views[v.type] = m_nullFallback.images[v.image]->createView(key);
++    }
++
++    m_nullFallback.buffer = m_common->dummyResources().bufferInfo();
++    m_nullFallback.bufferView = m_common->dummyResources().bufferView();
++  }
++
++
++  void DxvkContext::writeNullImage(DxvkLegacyDescriptor& info, VkImageViewType type) {
++    info.image.sampler = VK_NULL_HANDLE;
++    info.image.imageView = VK_NULL_HANDLE;
++    info.image.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++
++    if (likely(!m_nullFallback.needed) || uint32_t(type) > uint32_t(VK_IMAGE_VIEW_TYPE_CUBE_ARRAY))
++      return;
++
++    prepareNullFallback();
++
++    auto& view = m_nullFallback.views[type];
++    info.image.imageView = view->getDescriptor(type)->legacy.image.imageView;
++    info.image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
++    m_cmd->track(view->image(), DxvkAccess::Read);
++  }
++
++
++  void DxvkContext::writeNullBuffer(DxvkLegacyDescriptor& info) {
++    info.buffer.buffer = VK_NULL_HANDLE;
++    info.buffer.offset = 0;
++    info.buffer.range = VK_WHOLE_SIZE;
++
++    if (likely(!m_nullFallback.needed))
++      return;
++
++    prepareNullFallback();
++
++    info.buffer.buffer = m_nullFallback.buffer.buffer;
++    info.buffer.offset = m_nullFallback.buffer.offset;
++    info.buffer.range = m_nullFallback.buffer.size;
++  }
++
++
++  void DxvkContext::writeNullBufferView(DxvkLegacyDescriptor& info) {
++    info.bufferView = VK_NULL_HANDLE;
++
++    if (likely(!m_nullFallback.needed))
++      return;
++
++    prepareNullFallback();
++
++    info.bufferView = m_nullFallback.bufferView->getDescriptor(false)->legacy.bufferView;
++  }
++
++
+   void DxvkContext::initImage(
+     const Rc<DxvkImage>&            image,
+           VkImageLayout             initialLayout) {
+@@ -7133,9 +7239,7 @@ namespace dxvk {
+ 
+               trackUniformBufferBinding<TrackBindings>(binding, slice);
+             } else {
+-              descriptorInfo.buffer.buffer = VK_NULL_HANDLE;
+-              descriptorInfo.buffer.offset = 0;
+-              descriptorInfo.buffer.range = VK_WHOLE_SIZE;
++              writeNullBuffer(descriptorInfo);
+             }
+           } else {
+             switch (binding.getDescriptorType()) {
+@@ -7157,14 +7261,10 @@ namespace dxvk {
+ 
+                     m_cmd->track(view->image(), DxvkAccess::Read);
+                   } else {
+-                    descriptorInfo.image.sampler = VK_NULL_HANDLE;
+-                    descriptorInfo.image.imageView = VK_NULL_HANDLE;
+-                    descriptorInfo.image.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++                    writeNullImage(descriptorInfo, binding.getViewType());
+                   }
+                 } else {
+-                  descriptorInfo.image.sampler = VK_NULL_HANDLE;
+-                  descriptorInfo.image.imageView = VK_NULL_HANDLE;
+-                  descriptorInfo.image.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++                  writeNullImage(descriptorInfo, binding.getViewType());
+                 }
+               } break;
+ 
+@@ -7180,9 +7280,7 @@ namespace dxvk {
+ 
+                   trackImageViewBinding<TrackBindings, true>(binding, *res.imageView);
+                 } else {
+-                  descriptorInfo.image.sampler = VK_NULL_HANDLE;
+-                  descriptorInfo.image.imageView = VK_NULL_HANDLE;
+-                  descriptorInfo.image.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++                  writeNullImage(descriptorInfo, binding.getViewType());
+                 }
+               } break;
+ 
+@@ -7198,7 +7296,7 @@ namespace dxvk {
+ 
+                   trackBufferViewBinding<TrackBindings, false>(binding, *res.bufferView);
+                 } else {
+-                  descriptorInfo.bufferView = VK_NULL_HANDLE;
++                  writeNullBufferView(descriptorInfo);
+                 }
+               } break;
+ 
+@@ -7214,7 +7312,7 @@ namespace dxvk {
+ 
+                   trackBufferViewBinding<TrackBindings, true>(binding, *res.bufferView);
+                 } else {
+-                  descriptorInfo.bufferView = VK_NULL_HANDLE;
++                  writeNullBufferView(descriptorInfo);
+                 }
+               } break;
+ 
+@@ -7230,9 +7328,7 @@ namespace dxvk {
+ 
+                   trackBufferViewBinding<TrackBindings, false>(binding, *res.bufferView);
+                 } else {
+-                  descriptorInfo.buffer.buffer = VK_NULL_HANDLE;
+-                  descriptorInfo.buffer.offset = 0;
+-                  descriptorInfo.buffer.range = VK_WHOLE_SIZE;
++                  writeNullBuffer(descriptorInfo);
+                 }
+               } break;
+ 
+@@ -7248,9 +7344,7 @@ namespace dxvk {
+ 
+                   trackBufferViewBinding<TrackBindings, true>(binding, *res.bufferView);
+                 } else {
+-                  descriptorInfo.buffer.buffer = VK_NULL_HANDLE;
+-                  descriptorInfo.buffer.offset = 0;
+-                  descriptorInfo.buffer.range = VK_WHOLE_SIZE;
++                  writeNullBuffer(descriptorInfo);
+                 }
+               } break;
+ 
+diff --git a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
+index 2d73c55..16b04e5 100644
+--- a/src/dxvk/dxvk_context.h
++++ b/src/dxvk/dxvk_context.h
+@@ -1407,6 +1407,31 @@ namespace dxvk {
+ 
+     DxvkImplicitResolveTracker  m_implicitResolves;
+ 
++    /**
++     * \brief RA3: stand-ins for null descriptors
++     *
++     * Without VK_EXT_robustness2's nullDescriptor (Android's gfxstream,
++     * older Adreno/Mali), the legacy descriptor path writes these zeroed
++     * resources where it would write VK_NULL_HANDLE. Made and cleared on
++     * first use, per context.
++     */
++    struct {
++      bool                  needed = false;
++      bool                  ready  = false;
++      Rc<DxvkImage>         images[3];    // 1D, 2D (6 layers, cube-compatible), 3D
++      Rc<DxvkImageView>     views[VK_IMAGE_VIEW_TYPE_CUBE_ARRAY + 1];
++      Rc<DxvkBufferView>    bufferView;
++      DxvkResourceBufferInfo buffer = { };
++    } m_nullFallback;
++
++    void prepareNullFallback();
++
++    void writeNullImage(DxvkLegacyDescriptor& info, VkImageViewType type);
++
++    void writeNullBuffer(DxvkLegacyDescriptor& info);
++
++    void writeNullBufferView(DxvkLegacyDescriptor& info);
++
+     void blitImageFb(
+             Rc<DxvkImageView>     dstView,
+       const VkOffset3D*           dstOffsets,
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 0221825..184564c 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -816,6 +816,10 @@ namespace dxvk {
+     if (m_adapter->matchesDriver(VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, Version(), Version(25, 0, 3)))
+       m_shaderOptions.spirv.set(DxvkShaderSpirvFlag::ExportPointSize);
+ 
++    // RA3: without maintenance5, point size is undefined unless written
++    if (!m_features.khrMaintenance5.maintenance5)
++      m_shaderOptions.spirv.set(DxvkShaderSpirvFlag::ExportPointSize);
++
+     if (m_features.nvRawAccessChains.shaderRawAccessChains)
+       m_shaderOptions.spirv.set(DxvkShaderSpirvFlag::SupportsNvRawAccessChains);
+ 
+diff --git a/src/dxvk/dxvk_device.h b/src/dxvk/dxvk_device.h
+index 7fb070d..4dddc9d 100644
+--- a/src/dxvk/dxvk_device.h
++++ b/src/dxvk/dxvk_device.h
+@@ -81,6 +81,7 @@ namespace dxvk {
+    */
+   class DxvkDevice : public RcObject {
+     friend class DxvkContext;
++    friend class DxvkCommandList;   // RA3: dummy resources without maintenance5
+     friend class DxvkSubmissionQueue;
+     friend class DxvkDescriptorPoolTracker;
+   public:
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index 63d89d9..3312ad8 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -344,6 +344,23 @@ namespace dxvk {
+         VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME },
+     }};
+ 
++    // RA3: VK_EXT_load_store_op_none has the same enums as the KHR one;
++    // drivers that only expose the EXT (Android's gfxstream, older Adreno
++    // and Mali) get it enabled under the EXT name.
++    { auto khr = vk::makeExtension(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME);
++      auto ext = vk::makeExtension(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME);
++      auto khrIter = std::lower_bound(extensions.begin(), extensions.end(), khr, vk::SortExtension());
++      auto extIter = std::lower_bound(extensions.begin(), extensions.end(), ext, vk::SortExtension());
++      bool hasKhr = khrIter != extensions.end() && !vk::SortExtension()(khr, *khrIter);
++      bool hasExt = extIter != extensions.end() && !vk::SortExtension()(ext, *extIter);
++
++      if (!hasKhr && hasExt) {
++        m_extensionsSupported.khrLoadStoreOpNone = ext;
++        m_extensionsEnabled.khrLoadStoreOpNone = vk::makeExtension(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME);
++        m_extensionsEnabled.khrLoadStoreOpNone.specVersion = 0u;
++      }
++    }
++
+     for (const auto& alias : aliases) {
+       auto a = vk::makeExtension(alias.first);
+       auto b = vk::makeExtension(alias.second);
+@@ -489,6 +506,24 @@ namespace dxvk {
+   void DxvkDeviceCapabilities::disableUnusedFeatures(
+     const DxvkInstance&               instance,
+           bool                        safeMode) {
++    // RA3: DXVK_RA3_NO_MAINT=1 hides what Android's gfxstream lacks, to run
++    // the fallbacks on a desktop driver under the validation layers.
++    if (env::getEnvVar("DXVK_RA3_NO_MAINT") == "1") {
++      Logger::warn("DXVK_RA3_NO_MAINT: hiding maintenance5/6 and robustness2");
++      m_featuresSupported.khrMaintenance5.maintenance5 = VK_FALSE;
++      m_featuresSupported.khrMaintenance6.maintenance6 = VK_FALSE;
++      m_featuresSupported.extRobustness2.robustBufferAccess2 = VK_FALSE;
++      m_featuresSupported.extRobustness2.robustImageAccess2 = VK_FALSE;
++      m_featuresSupported.extRobustness2.nullDescriptor = VK_FALSE;
++    }
++
++    // RA3: descriptor buffers and heaps write null descriptors for unbound
++    // slots; without nullDescriptor only the legacy binding model works.
++    if (!m_featuresSupported.extRobustness2.nullDescriptor) {
++      m_featuresSupported.extDescriptorBuffer.descriptorBuffer = VK_FALSE;
++      m_featuresSupported.extDescriptorHeap.descriptorHeap = VK_FALSE;
++    }
++
+     if (m_featuresSupported.extDescriptorHeap.descriptorHeap) {
+       // Only enable descriptor heaps on drivers that are known to work and don't
+       // have known performance regressions currently.
+@@ -985,9 +1020,11 @@ namespace dxvk {
+       ENABLE_EXT_FEATURE(extPageableDeviceLocalMemory, pageableDeviceLocalMemory, false),
+ 
+       /* Robustness, all features effectively required for correctness */
+-      ENABLE_EXT_FEATURE(extRobustness2, robustBufferAccess2, true),
++      /* RA3: optional; without it, unbound descriptors get dummy resources
++       * (DxvkUnboundResources) and the descriptor buffer/heap paths are off */
++      ENABLE_EXT_FEATURE(extRobustness2, robustBufferAccess2, false),
+       ENABLE_EXT_FEATURE(extRobustness2, robustImageAccess2, false),
+-      ENABLE_EXT_FEATURE(extRobustness2, nullDescriptor, true),
++      ENABLE_EXT_FEATURE(extRobustness2, nullDescriptor, false),
+ 
+       /* Sample locations, used to "disable" MSAA rendering */
+       ENABLE_EXT(extSampleLocations, false),
+@@ -1029,11 +1066,13 @@ namespace dxvk {
+ 
+       /* LOAD_OP_NONE for certain tiler optimizations. Core feature
+        * in Vulkan 1.4, so probably supported by everything we need. */
+-      ENABLE_EXT(khrLoadStoreOpNone, true),
++      ENABLE_EXT(khrLoadStoreOpNone, true),   /* RA3: the EXT alias counts too */
+ 
+       /* Maintenance features, relied on in various parts of the code */
+-      ENABLE_EXT_FEATURE(khrMaintenance5, maintenance5, true),
+-      ENABLE_EXT_FEATURE(khrMaintenance6, maintenance6, true),
++      /* RA3: optional; the command wrappers and pipeline creation fall back
++       * to the Vulkan 1.3 entry points without them */
++      ENABLE_EXT_FEATURE(khrMaintenance5, maintenance5, false),
++      ENABLE_EXT_FEATURE(khrMaintenance6, maintenance6, false),
+       ENABLE_EXT_FEATURE(khrMaintenance7, maintenance7, false),
+       ENABLE_EXT_FEATURE(khrMaintenance8, maintenance8, false),
+       ENABLE_EXT_FEATURE(khrMaintenance9, maintenance9, false),
+diff --git a/src/dxvk/dxvk_presenter.cpp b/src/dxvk/dxvk_presenter.cpp
+index f93ae8d..93086f8 100644
+--- a/src/dxvk/dxvk_presenter.cpp
++++ b/src/dxvk/dxvk_presenter.cpp
+@@ -3,6 +3,11 @@
+ #include "dxvk_device.h"
+ #include "dxvk_presenter.h"
+ 
++#if defined(DXVK_WSI_ANDROID)
++extern "C" uint32_t dxvk_android_window_generation();   // RA3: wsi/android
++extern "C" void dxvk_android_surface_destroyed(uint64_t surface);
++#endif
++
+ #include "../wsi/wsi_window.h"
+ 
+ namespace dxvk {
+@@ -108,6 +113,21 @@ namespace dxvk {
+         sync.acquire, VK_NULL_HANDLE, &m_imageIndex);
+     }
+ 
++#if defined(DXVK_WSI_ANDROID)
++    // RA3: Android reports SUBOPTIMAL on every landscape present (the
++    // compositor rotates); recreating for it each frame went black elsewhere.
++    if (m_acquireStatus == VK_SUBOPTIMAL_KHR)
++      m_acquireStatus = VK_SUCCESS;
++    // A new window from the shell: the surface goes with the old one.
++    // (m_surfaceMutex is already held, by `lock` above.)
++    { uint32_t gen = dxvk_android_window_generation();
++      if (gen != m_androidGeneration) {
++        m_androidGeneration = gen;
++        m_dirtySurface = true;
++        m_acquireStatus = VK_ERROR_OUT_OF_DATE_KHR;
++      } }
++#endif
++
+     // This is a normal occurence, but may be useful for
+     // debugging purposes in case WSI goes wrong somehow.
+     if (m_acquireStatus != VK_SUCCESS && m_swapchain)
+@@ -275,6 +295,11 @@ namespace dxvk {
+     // There is no guarantee that suboptimal state is returned by both functions.
+     std::lock_guard lock(m_surfaceMutex);
+ 
++#if defined(DXVK_WSI_ANDROID)
++    if (status == VK_SUBOPTIMAL_KHR)
++      status = VK_SUCCESS;                  // RA3: see acquireNextImage
++#endif
++
+     if (status != VK_SUCCESS) {
+       Logger::info(str::format("Presenter: Got ", status, ", recreating swapchain"));
+ 
+@@ -1270,6 +1295,9 @@ namespace dxvk {
+ 
+   void Presenter::destroySurface() {
+     m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
++#if defined(DXVK_WSI_ANDROID)
++    dxvk_android_surface_destroyed(uint64_t(m_surface));   // RA3: its window reference
++#endif
+ 
+     m_surface = VK_NULL_HANDLE;
+   }
+diff --git a/src/dxvk/dxvk_presenter.h b/src/dxvk/dxvk_presenter.h
+index f4b8a0c..2e89329 100644
+--- a/src/dxvk/dxvk_presenter.h
++++ b/src/dxvk/dxvk_presenter.h
+@@ -277,6 +277,9 @@ namespace dxvk {
+     dxvk::condition_variable    m_surfaceCond;
+ 
+     VkSurfaceKHR                m_surface     = VK_NULL_HANDLE;
++#if defined(DXVK_WSI_ANDROID)
++    uint32_t                    m_androidGeneration = 0;   // RA3: wsi/android
++#endif
+     VkSwapchainKHR              m_swapchain   = VK_NULL_HANDLE;
+ 
+     VkFullScreenExclusiveEXT    m_fullscreenMode = VK_FULL_SCREEN_EXCLUSIVE_DISALLOWED_EXT;
+diff --git a/src/dxvk/dxvk_swapchain_blitter.cpp b/src/dxvk/dxvk_swapchain_blitter.cpp
+index 1bcdafa..a61d9f1 100644
+--- a/src/dxvk/dxvk_swapchain_blitter.cpp
++++ b/src/dxvk/dxvk_swapchain_blitter.cpp
+@@ -65,6 +65,9 @@ namespace dxvk {
+     if (m_cursorBuffer)
+       uploadCursorImage(ctx);
+ 
++    if (!m_nullView1D && !m_device->features().extRobustness2.nullDescriptor)
++      createNullViews(ctx);
++
+     // If we can't do proper blending, render the HUD into a separate image
+     bool composite = needsComposition(dstView);
+ 
+@@ -316,12 +319,16 @@ namespace dxvk {
+ 
+     if (m_gammaView)
+       gammaDescriptor.descriptor = m_gammaView->getDescriptor();
++    else if (m_nullView1D)
++      gammaDescriptor.descriptor = m_nullView1D->getDescriptor();
+ 
+     auto& hudDescriptor = descriptors[2u];
+     hudDescriptor.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+ 
+     if (m_hudSrv)
+       hudDescriptor.descriptor = m_hudSrv->getDescriptor();
++    else if (m_nullView2D)
++      hudDescriptor.descriptor = m_nullView2D->getDescriptor();
+ 
+     auto& cursorDescriptor = descriptors[3u];
+     cursorDescriptor.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+@@ -336,6 +343,8 @@ namespace dxvk {
+         cursorSampler = m_samplerCursorLinear->getDescriptor().samplerIndex;
+ 
+       cursorDescriptor.descriptor = m_cursorView->getDescriptor();
++    } else if (m_nullView2D) {
++      cursorDescriptor.descriptor = m_nullView2D->getDescriptor();
+     }
+ 
+     PushConstants args = { };
+@@ -602,6 +611,54 @@ namespace dxvk {
+   }
+ 
+ 
++  void DxvkSwapchainBlitter::createNullViews(
++    const Rc<DxvkCommandList>&        ctx) {
++    DxvkBufferCreateInfo bufferInfo = { };
++    bufferInfo.size = 64u;
++    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
++    bufferInfo.stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
++    bufferInfo.access = VK_ACCESS_TRANSFER_READ_BIT;
++    bufferInfo.debugName = "Null view upload";
++
++    Rc<DxvkBuffer> zeroes = m_device->createBuffer(bufferInfo,
++      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
++    std::memset(zeroes->mapPtr(0), 0, bufferInfo.size);
++
++    for (uint32_t i = 0u; i < 2u; i++) {
++      DxvkImageCreateInfo imageInfo = { };
++      imageInfo.type = i ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_1D;
++      imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
++      imageInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
++      imageInfo.extent = { 1u, 1u, 1u };
++      imageInfo.numLayers = 1u;
++      imageInfo.mipLevels = 1u;
++      imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
++      imageInfo.stages = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
++      imageInfo.access = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
++      imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
++      imageInfo.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++      imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++      imageInfo.debugName = "Null view stand-in";
++
++      Rc<DxvkImage> image = m_device->createImage(imageInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
++      uploadTexture(ctx, image, zeroes);
++
++      DxvkImageViewKey viewInfo = { };
++      viewInfo.viewType = i ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_1D;
++      viewInfo.format = imageInfo.format;
++      viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
++      viewInfo.aspects = VK_IMAGE_ASPECT_COLOR_BIT;
++      viewInfo.mipIndex = 0u;
++      viewInfo.mipCount = 1u;
++      viewInfo.layerIndex = 0u;
++      viewInfo.layerCount = 1u;
++
++      (i ? m_nullImage2D : m_nullImage1D) = image;
++      (i ? m_nullView2D : m_nullView1D) = image->createView(viewInfo);
++    }
++  }
++
++
+   void DxvkSwapchainBlitter::uploadCursorImage(
+     const Rc<DxvkCommandList>&        ctx) {
+     uploadTexture(ctx, m_cursorImage, m_cursorBuffer);
+diff --git a/src/dxvk/dxvk_swapchain_blitter.h b/src/dxvk/dxvk_swapchain_blitter.h
+index f5233ba..7d07a04 100644
+--- a/src/dxvk/dxvk_swapchain_blitter.h
++++ b/src/dxvk/dxvk_swapchain_blitter.h
+@@ -232,6 +232,16 @@ namespace dxvk {
+     Rc<DxvkImageView>   m_hudRtv;
+     Rc<DxvkImageView>   m_hudSrv;
+ 
++    // RA3: zeroed stand-ins for the gamma (1D) and HUD/cursor (2D) bindings
++    // on devices without VK_EXT_robustness2's nullDescriptor
++    Rc<DxvkImage>       m_nullImage1D;
++    Rc<DxvkImage>       m_nullImage2D;
++    Rc<DxvkImageView>   m_nullView1D;
++    Rc<DxvkImageView>   m_nullView2D;
++
++    void createNullViews(
++      const Rc<DxvkCommandList>&        ctx);
++
+     const DxvkPipelineLayout* m_blitLayout = nullptr;
+     const DxvkPipelineLayout* m_cursorLayout = nullptr;
+ 
+diff --git a/src/dxvk/dxvk_unbound.cpp b/src/dxvk/dxvk_unbound.cpp
+index 4c62d36..56d666b 100644
+--- a/src/dxvk/dxvk_unbound.cpp
++++ b/src/dxvk/dxvk_unbound.cpp
+@@ -27,6 +27,20 @@ namespace dxvk {
+   }
+ 
+ 
++  Rc<DxvkBufferView> DxvkUnboundResources::bufferView() {
++    bufferInfo();
++
++    DxvkBufferViewKey key;
++    key.format = VK_FORMAT_R32_UINT;
++    key.usage  = VkBufferUsageFlagBits(VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT
++                                     | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
++    key.offset = 0u;
++    key.size   = 256u;
++
++    return m_buffer->createView(key);
++  }
++
++
+   DxvkSamplerDescriptor DxvkUnboundResources::samplerInfo() {
+     if (unlikely(!m_samplerCreated.load())) {
+       std::lock_guard lock(m_mutex);
+diff --git a/src/dxvk/dxvk_unbound.h b/src/dxvk/dxvk_unbound.h
+index 4de7ec9..49ed307 100644
+--- a/src/dxvk/dxvk_unbound.h
++++ b/src/dxvk/dxvk_unbound.h
+@@ -33,6 +33,15 @@ namespace dxvk {
+      */
+     DxvkResourceBufferInfo bufferInfo();
+ 
++    /**
++     * \brief RA3: zero texel buffer view of the dummy buffer
++     *
++     * Stands in for a null texel buffer descriptor on
++     * devices without VK_EXT_robustness2's nullDescriptor.
++     * \returns Dummy buffer view (R32_UINT, uniform and storage)
++     */
++    Rc<DxvkBufferView> bufferView();
++
+     /**
+      * \brief Dummy sampler object
+      * 
+diff --git a/src/dxvk/meson.build b/src/dxvk/meson.build
+index 6b12f95..f985f61 100644
+--- a/src/dxvk/meson.build
++++ b/src/dxvk/meson.build
+@@ -29,6 +29,7 @@ dxvk_shaders = files([
+ dxvk_src = [
+   'dxvk_access.cpp',
+   'dxvk_adapter.cpp',
++  'dxvk_android_compat.cpp',
+   'dxvk_allocator.cpp',
+   'dxvk_barrier.cpp',
+   'dxvk_buffer.cpp',
+diff --git a/src/wsi/android/wsi_platform_android.cpp b/src/wsi/android/wsi_platform_android.cpp
+new file mode 100644
+index 0000000..6d3c05b
+--- /dev/null
++++ b/src/wsi/android/wsi_platform_android.cpp
+@@ -0,0 +1,214 @@
++#if defined(DXVK_WSI_ANDROID)
++
++/* RA3 (liftingCPath D007): WSI on Android (docs/ANDROID.md). Designed after
++ * the lessons of nfsu2-recompiled's dxvk-native port (no code from it):
++ *
++ * - the HWND is a stable token; the ANativeWindow behind it is swapped by the
++ *   shell, and each new window bumps a generation the swap chain watches
++ *   (dxvk_android_window_generation) to rebuild its surface;
++ * - every VkSurface holds a reference on the ANativeWindow it was made from
++ *   (released with the surface: dxvk_android_surface_destroyed), since a
++ *   surface that outlives its window crashes drivers;
++ * - the window's buffers are sized to the game's back buffer
++ *   (ANativeWindow_setBuffersGeometry) and the compositor scales them, so
++ *   the size DXVK asks for is the size it gets;
++ * - one monitor whose modes are the usual PC ones, plus the window's own.
++ */
++
++#include <android/native_window.h>
++#include <mutex>
++#include <unordered_map>
++
++#define VK_USE_PLATFORM_ANDROID_KHR 1
++#include "wsi_platform_android.h"
++#include "../../vulkan/vulkan_loader.h"
++#include <vulkan/vulkan_android.h>
++#include "../../util/util_string.h"
++#include "../../util/log/log.h"
++#include "native/wsi/native_android.h"
++
++namespace {
++  std::mutex          g_mutex;
++  ANativeWindow*      g_window = nullptr;
++  uint32_t            g_generation = 0;
++  uint32_t            g_width = 1280, g_height = 720;      /* the game's back buffer */
++  std::unordered_map<uint64_t, ANativeWindow*> g_surface_window;   /* the reference each surface holds */
++}
++
++extern "C" {
++
++  /* The shell: the activity's window (NULL when it goes). */
++  __attribute__((visibility("default"))) void dxvk_android_set_window(ANativeWindow* window) {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    if (window == g_window)
++      return;
++    if (window) {
++      ANativeWindow_acquire(window);
++      ANativeWindow_setBuffersGeometry(window, int32_t(g_width), int32_t(g_height), 0);
++    }
++    if (g_window)
++      ANativeWindow_release(g_window);
++    g_window = window;
++    g_generation++;
++  }
++
++  __attribute__((visibility("default"))) uint32_t dxvk_android_window_generation() {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    return g_generation;
++  }
++
++  __attribute__((visibility("default"))) void* dxvk_android_hwnd() {
++    return dxvk::wsi::androidHwnd();
++  }
++
++  /* The presenter destroyed a surface: release the window it held (createSurface). */
++  void dxvk_android_surface_destroyed(uint64_t surface) {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    auto it = g_surface_window.find(surface);
++    if (it == g_surface_window.end())
++      return;
++    ANativeWindow_release(it->second);
++    g_surface_window.erase(it);
++  }
++
++}
++
++namespace dxvk::wsi {
++
++  static const HMONITOR g_monitor = reinterpret_cast<HMONITOR>(uintptr_t(1));
++
++  std::vector<const char *> AndroidWsiDriver::getInstanceExtensions() {
++    return { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME };
++  }
++
++  HMONITOR AndroidWsiDriver::getDefaultMonitor() { return g_monitor; }
++  HMONITOR AndroidWsiDriver::enumMonitors(uint32_t index) { return index ? nullptr : g_monitor; }
++  HMONITOR AndroidWsiDriver::enumMonitors(const LUID *[], uint32_t, uint32_t index) { return enumMonitors(index); }
++
++  bool AndroidWsiDriver::getDisplayName(HMONITOR hMonitor, WCHAR (&Name)[32]) {
++    if (hMonitor != g_monitor)
++      return false;
++    const WCHAR name[] = { '\\', '\\', '.', '\\', 'D', 'I', 'S', 'P', 'L', 'A', 'Y', '1', 0 };
++    std::memcpy(Name, name, sizeof(name));
++    return true;
++  }
++
++  /* The desktop is the size of the game's back buffer: the game's own idea
++   * of the screen, which the compositor scales to the display. */
++  bool AndroidWsiDriver::getDesktopCoordinates(HMONITOR hMonitor, RECT* pRect) {
++    if (hMonitor != g_monitor)
++      return false;
++    std::lock_guard<std::mutex> lock(g_mutex);
++    *pRect = { 0, 0, LONG(g_width), LONG(g_height) };
++    return true;
++  }
++
++  static const uint32_t s_modes[][2] = {
++    { 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1280, 800 }, { 1366, 768 },
++    { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 },
++  };
++
++  bool AndroidWsiDriver::getDisplayMode(HMONITOR hMonitor, uint32_t modeNumber, WsiMode* pMode) {
++    if (hMonitor != g_monitor || modeNumber >= std::size(s_modes))
++      return false;
++    pMode->width = s_modes[modeNumber][0];
++    pMode->height = s_modes[modeNumber][1];
++    pMode->refreshRate = WsiRational { 60, 1 };
++    pMode->bitsPerPixel = 32;
++    pMode->interlaced = false;
++    return true;
++  }
++
++  bool AndroidWsiDriver::getCurrentDisplayMode(HMONITOR hMonitor, WsiMode* pMode) {
++    if (hMonitor != g_monitor)
++      return false;
++    std::lock_guard<std::mutex> lock(g_mutex);
++    pMode->width = g_width;
++    pMode->height = g_height;
++    pMode->refreshRate = WsiRational { 60, 1 };
++    pMode->bitsPerPixel = 32;
++    pMode->interlaced = false;
++    return true;
++  }
++
++  bool AndroidWsiDriver::getDesktopDisplayMode(HMONITOR hMonitor, WsiMode* pMode) {
++    return getCurrentDisplayMode(hMonitor, pMode);
++  }
++
++  WsiEdidData AndroidWsiDriver::getMonitorEdid(HMONITOR) { return {}; }
++
++  void AndroidWsiDriver::getWindowSize(HWND, uint32_t* pWidth, uint32_t* pHeight) {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    if (pWidth) *pWidth = g_width;
++    if (pHeight) *pHeight = g_height;
++  }
++
++  /* The back buffer's size: the window's buffers follow, the compositor scales. */
++  void AndroidWsiDriver::resizeWindow(HWND, DxvkWindowState*, uint32_t width, uint32_t height) {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    if (!width || !height)
++      return;
++    g_width = width;
++    g_height = height;
++    if (g_window)
++      ANativeWindow_setBuffersGeometry(g_window, int32_t(width), int32_t(height), 0);
++  }
++
++  void AndroidWsiDriver::saveWindowState(HWND, DxvkWindowState*, bool) { }
++  void AndroidWsiDriver::restoreWindowState(HWND, DxvkWindowState*, bool) { }
++
++  bool AndroidWsiDriver::setWindowMode(HMONITOR, HWND hWindow, DxvkWindowState* pState, const WsiMode& mode) {
++    resizeWindow(hWindow, pState, mode.width, mode.height);
++    return true;
++  }
++
++  bool AndroidWsiDriver::enterFullscreenMode(HMONITOR, HWND, DxvkWindowState*, bool) { return true; }
++  bool AndroidWsiDriver::leaveFullscreenMode(HWND, DxvkWindowState*) { return true; }
++  bool AndroidWsiDriver::restoreDisplayMode() { return true; }
++  HMONITOR AndroidWsiDriver::getWindowMonitor(HWND) { return g_monitor; }
++  bool AndroidWsiDriver::isWindow(HWND hWindow) { return isAndroidHwnd(hWindow); }
++
++  bool AndroidWsiDriver::isMinimized(HWND) {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    return g_window == nullptr;
++  }
++
++  bool AndroidWsiDriver::isOccluded(HWND hWindow) { return isMinimized(hWindow); }
++  void AndroidWsiDriver::updateFullscreenWindow(HMONITOR, HWND, bool) { }
++
++  /* A surface on the current window, holding a reference on it; none (and
++   * SURFACE_LOST, which the presenter retries) while the app has no window. */
++  VkResult AndroidWsiDriver::createSurface(HWND hWindow, PFN_vkGetInstanceProcAddr pfnVkGetInstanceProcAddr,
++                                           VkInstance instance, VkSurfaceKHR* pSurface) {
++    if (!isAndroidHwnd(hWindow))
++      return VK_ERROR_SURFACE_LOST_KHR;
++    auto create = reinterpret_cast<PFN_vkCreateAndroidSurfaceKHR>(
++      pfnVkGetInstanceProcAddr(instance, "vkCreateAndroidSurfaceKHR"));
++    if (!create)
++      return VK_ERROR_EXTENSION_NOT_PRESENT;
++    std::lock_guard<std::mutex> lock(g_mutex);
++    if (!g_window)
++      return VK_ERROR_SURFACE_LOST_KHR;
++    VkAndroidSurfaceCreateInfoKHR info = { VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
++    info.window = g_window;
++    VkResult vr = create(instance, &info, nullptr, pSurface);
++    if (vr == VK_SUCCESS) {
++      ANativeWindow_acquire(g_window);       /* released by dxvk_android_surface_destroyed */
++      g_surface_window[uint64_t(*pSurface)] = g_window;
++    }
++    return vr;
++  }
++
++  static bool createAndroidDriver(WsiDriver **driver) {
++    *driver = new AndroidWsiDriver();
++    return true;
++  }
++
++  WsiBootstrap AndroidWSI = {
++    "Android",
++    createAndroidDriver
++  };
++
++}
++
++#endif
+diff --git a/src/wsi/android/wsi_platform_android.h b/src/wsi/android/wsi_platform_android.h
+new file mode 100644
+index 0000000..5575edd
+--- /dev/null
++++ b/src/wsi/android/wsi_platform_android.h
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include "../wsi_platform.h"
++
++namespace dxvk::wsi {
++
++  /* RA3 (liftingCPath D007): WSI on Android's ANativeWindow. One monitor,
++   * one window (a stable HWND token, native_android.h); the window behind
++   * it is set by the shell on INIT_WINDOW/TERM_WINDOW. */
++  class AndroidWsiDriver : public WsiDriver {
++  public:
++    std::vector<const char *> getInstanceExtensions() override;
++
++    HMONITOR getDefaultMonitor() override;
++    HMONITOR enumMonitors(uint32_t index) override;
++    HMONITOR enumMonitors(const LUID *adapterLUID[], uint32_t numLUIDs, uint32_t index) override;
++    bool getDisplayName(HMONITOR hMonitor, WCHAR (&Name)[32]) override;
++    bool getDesktopCoordinates(HMONITOR hMonitor, RECT* pRect) override;
++    bool getDisplayMode(HMONITOR hMonitor, uint32_t modeNumber, WsiMode* pMode) override;
++    bool getCurrentDisplayMode(HMONITOR hMonitor, WsiMode* pMode) override;
++    bool getDesktopDisplayMode(HMONITOR hMonitor, WsiMode* pMode) override;
++    WsiEdidData getMonitorEdid(HMONITOR hMonitor) override;
++
++    void getWindowSize(HWND hWindow, uint32_t* pWidth, uint32_t* pHeight) override;
++    void resizeWindow(HWND hWindow, DxvkWindowState* pState, uint32_t width, uint32_t height) override;
++    void saveWindowState(HWND hWindow, DxvkWindowState* pState, bool saveStyle) override;
++    void restoreWindowState(HWND hWindow, DxvkWindowState* pState, bool restoreCoordinates) override;
++    bool setWindowMode(HMONITOR hMonitor, HWND hWindow, DxvkWindowState* pState, const WsiMode& mode) override;
++    bool enterFullscreenMode(HMONITOR hMonitor, HWND hWindow, DxvkWindowState* pState, bool modeSwitch) override;
++    bool leaveFullscreenMode(HWND hWindow, DxvkWindowState* pState) override;
++    bool restoreDisplayMode() override;
++    HMONITOR getWindowMonitor(HWND hWindow) override;
++    bool isWindow(HWND hWindow) override;
++    bool isMinimized(HWND hWindow) override;
++    bool isOccluded(HWND hWindow) override;
++    void updateFullscreenWindow(HMONITOR hMonitor, HWND hWindow, bool forceTopmost) override;
++    VkResult createSurface(HWND hWindow, PFN_vkGetInstanceProcAddr pfnVkGetInstanceProcAddr,
++                           VkInstance instance, VkSurfaceKHR* pSurface) override;
++  };
++
++}
+diff --git a/src/wsi/meson.build b/src/wsi/meson.build
+index 1d88e2c..9071afc 100644
+--- a/src/wsi/meson.build
++++ b/src/wsi/meson.build
+@@ -13,6 +13,7 @@ wsi_src = [
+   'glfw/wsi_monitor_glfw.cpp',
+   'glfw/wsi_platform_glfw.cpp',
+   'glfw/wsi_window_glfw.cpp',
++  'android/wsi_platform_android.cpp',
+ ]
+ 
+ wsi_deps = [ dep_displayinfo ]
+diff --git a/src/wsi/wsi_platform.cpp b/src/wsi/wsi_platform.cpp
+index 08f456e..93913f6 100644
+--- a/src/wsi/wsi_platform.cpp
++++ b/src/wsi/wsi_platform.cpp
+@@ -12,6 +12,9 @@ namespace dxvk::wsi {
+ #if defined(DXVK_WSI_WIN32)
+     &Win32WSI,
+ #endif
++#if defined(DXVK_WSI_ANDROID)
++    &AndroidWSI,
++#endif
+ #if defined(DXVK_WSI_SDL3)
+     &Sdl3WSI,
+ #endif
+@@ -33,6 +36,8 @@ namespace dxvk::wsi {
+         // for other platforms however we _need_ to know which WSI to use!
+ #if defined(DXVK_WSI_WIN32)
+         hint = "Win32";
++#elif defined(DXVK_WSI_ANDROID)
++        hint = "Android";   // RA3: the only one there
+ #else
+         throw DxvkError("DXVK_WSI_DRIVER environment variable unset");
+ #endif
+diff --git a/src/wsi/wsi_platform.h b/src/wsi/wsi_platform.h
+index f1fae3f..8363857 100644
+--- a/src/wsi/wsi_platform.h
++++ b/src/wsi/wsi_platform.h
+@@ -114,6 +114,9 @@ namespace dxvk::wsi {
+ #if defined(DXVK_WSI_WIN32)
+   extern WsiBootstrap Win32WSI;
+ #endif
++#if defined(DXVK_WSI_ANDROID)
++  extern WsiBootstrap AndroidWSI;   // RA3: wsi/android
++#endif
+ #if defined(DXVK_WSI_SDL3)
+   extern WsiBootstrap Sdl3WSI;
+ #endif
+diff --git a/src/wsi/wsi_window.h b/src/wsi/wsi_window.h
+index 085a437..27900fb 100644
+--- a/src/wsi/wsi_window.h
++++ b/src/wsi/wsi_window.h
+@@ -27,6 +27,9 @@ namespace dxvk::wsi {
+ #if defined(DXVK_WSI_SDL2)
+     // Nothing to store
+ #endif
++#if defined(DXVK_WSI_ANDROID)
++    // Nothing to store (RA3)
++#endif
+ #if defined(DXVK_WSI_GLFW)
+     // Nothing to store
+ #endif

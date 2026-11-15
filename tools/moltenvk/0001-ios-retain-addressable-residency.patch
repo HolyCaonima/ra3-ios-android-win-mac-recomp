@@ -1,0 +1,67 @@
+# Modified by HolyCaonima/contributors, 2026: iOS residency lifetime.
+# Upstream context remains Apache-2.0. See LICENSES/MoltenVK.txt and MoltenVK-NOTICE.txt.
+# Changed files: MVKCommandEncoderState.mm, MVKDevice.h, MVKDevice.mm.
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm b/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm
+index 7d16b94..7e12d9b 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm
+@@ -656,7 +656,7 @@ static void bindMetalResources(id<MTLCommandEncoder> encoder,
+ 			mtlShared._gpuAddressableResourceStages = useResourceStage;
+ 		else
+ 			mtlShared._gpuAddressableResourceStages = combineStages(mtlShared._gpuAddressableResourceStages, useResourceStage);
+-		mvkEncoder.getDevice()->encodeGPUAddressableBuffers(mtlShared._useResource, useResourceStage);
++		mvkEncoder.getDevice()->encodeGPUAddressableBuffers(mtlShared._useResource, useResourceStage, mvkEncoder._mtlCmdBuffer);
+ 	}
+ 
+ 	const MVKShaderStageResourceBinding& resourceCounts = common._layout->getResourceCounts().stages[vkStage];
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+index 534a414..97a6569 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+@@ -868,7 +868,7 @@ public:
+ #pragma mark Operations
+ 
+ 	/** Tell the GPU to be ready to use any of the GPU-addressable buffers. */
+-	void encodeGPUAddressableBuffers(MVKUseResourceHelper& resources, MVKResourceUsageStages stage);
++	void encodeGPUAddressableBuffers(MVKUseResourceHelper& resources, MVKResourceUsageStages stage, id<MTLCommandBuffer> commandBuffer);
+ 
+ 	/** Adds the specified host semaphore to be woken upon device loss. */
+ 	void addSemaphore(MVKSemaphoreImpl* sem4);
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+index 9772757..8c0203b 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -4600,11 +4600,31 @@ static uint32_t mvkGetEntryProperty(io_registry_entry_t entry, CFStringRef prope
+ 	return mvkBuff;
+ }
+ 
+-void MVKDevice::encodeGPUAddressableBuffers(MVKUseResourceHelper& resources, MVKResourceUsageStages stage) {
++void MVKDevice::encodeGPUAddressableBuffers(MVKUseResourceHelper& resources, MVKResourceUsageStages stage, id<MTLCommandBuffer> commandBuffer) {
+ 	lock_guard<mutex> lock(_rezLock);
++#if MVK_IOS
++	// This residency list includes buffers that the application does not use in
++	// this submission. It may legally destroy those buffers while this command
++	// buffer is pending. Retain the Metal snapshot under the registry lock,
++	// including the interval before deferred useResources encoding, until GPU
++	// completion. Do not retain the Vulkan objects or defer frees indefinitely.
++	NSMutableArray<id<MTLBuffer>>* retainedBuffers = [[NSMutableArray alloc] initWithCapacity: _gpuAddressableBuffers.size()];
++#endif
+ 	for (auto& buff : _gpuAddressableBuffers) {
+-		resources.add(buff->getMTLBuffer(), stage, true);
++		id<MTLBuffer> buffer = buff->getMTLBuffer();
++#if MVK_IOS
++		if (buffer) { [retainedBuffers addObject: buffer]; }
++#endif
++		resources.add(buffer, stage, true);
+ 	}
++#if MVK_IOS
++	// Metal copies the block and retains its Objective-C captures. Empty the
++	// snapshot at completion even if the command buffer itself is pooled.
++	[commandBuffer addCompletedHandler: ^(id<MTLCommandBuffer>) {
++		[retainedBuffers removeAllObjects];
++	}];
++	[retainedBuffers release];
++#endif
+ }
+ 
+ MVKImage* MVKDevice::addImage(MVKImage* mvkImg) {

@@ -1,0 +1,261 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+# RA3: Darwin native D3D9 over MoltenVK. Apply after 0001-0007.
+# Includes valid zero-buffer bindings when nullDescriptor is unavailable.
+
+diff --git a/src/d3d9/meson.build b/src/d3d9/meson.build
+--- a/src/d3d9/meson.build
++++ b/src/d3d9/meson.build
+@@ -55,7 +55,7 @@
+ d3d9_ld_args      = []
+ d3d9_link_depends = []
+ 
+-if platform != 'windows'
++if platform != 'windows' and platform != 'darwin'
+   d3d9_ld_args      += [ '-Wl,--version-script', join_paths(meson.current_source_dir(), 'd3d9.sym') ]
+   d3d9_link_depends += files('d3d9.sym')
+ endif
+diff --git a/src/dxvk/dxvk_adapter.cpp b/src/dxvk/dxvk_adapter.cpp
+--- a/src/dxvk/dxvk_adapter.cpp
++++ b/src/dxvk/dxvk_adapter.cpp
+@@ -1,7 +1,13 @@
++#ifdef __APPLE__
++#define VK_ENABLE_BETA_EXTENSIONS
++#endif
+ #include <cstring>
+ #include <unordered_set>
+ 
+ #include "dxvk_adapter.h"
++#ifdef __APPLE__
++#include <vulkan/vulkan_beta.h>
++#endif
+ #include "dxvk_android_compat.h"
+ #include "dxvk_device.h"
+ #include "dxvk_instance.h"
+@@ -253,6 +259,9 @@
+     for (const auto& ext : extensions)
+       extensionNames.push_back(ext.extensionName);
+ 
++#ifdef __APPLE__
++    extensionNames.push_back("VK_KHR_portability_subset");
++#endif
+     // Query queue infos
+     DxvkDeviceQueueMapping queueMapping = caps.getQueueMapping();
+ 
+@@ -287,6 +296,15 @@
+     deviceInfo.ppEnabledExtensionNames = extensionNames.data();
+     deviceInfo.pEnabledFeatures = &features->features;
+ 
++#ifdef __APPLE__
++    VkPhysicalDevicePortabilitySubsetFeaturesKHR portability = {
++      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR };
++    VkPhysicalDeviceFeatures2 portabilityQuery = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &portability };
++    vk->vkGetPhysicalDeviceFeatures2(m_handle, &portabilityQuery);
++    // Enable only the subset features the driver actually supports.
++    portability.pNext = const_cast<void*>(deviceInfo.pNext);
++    deviceInfo.pNext = &portability;
++#endif
+     VkDevice device = VK_NULL_HANDLE;
+     VkResult vr = vk->vkCreateDevice(m_handle, &deviceInfo, nullptr, &device);
+ 
+diff --git a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -7915,7 +7915,12 @@
+       m_cmd->track(m_state.vi.indexBuffer.buffer(), DxvkAccess::Read);
+     } else {
+       // Bind null index buffer to read all zeroes, not too useful but well-defined
+-      m_cmd->cmdBindIndexBuffer2(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, m_state.vi.indexType);
++      if (m_nullFallback.needed) {
++        auto zero = m_common->dummyResources().bufferInfo();
++        m_cmd->cmdBindIndexBuffer2(zero.buffer, zero.offset, zero.size, m_state.vi.indexType);
++      } else {
++        m_cmd->cmdBindIndexBuffer2(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE, m_state.vi.indexType);
++      }
+     }
+   }
+   
+@@ -7964,6 +7969,12 @@
+         offsets[i] = 0;
+         lengths[i] = 0;
+         strides[i] = 0;
++        if (m_nullFallback.needed) {
++          auto zero = m_common->dummyResources().bufferInfo();
++          buffers[i] = zero.buffer;
++          offsets[i] = zero.offset;
++          lengths[i] = zero.size;
++        }
+       }
+     }
+ 
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -877,7 +877,11 @@
+       ENABLE_FEATURE(core.features, fillModeNonSolid, true),
+       ENABLE_FEATURE(core.features, fragmentStoresAndAtomics, true),
+       ENABLE_FEATURE(core.features, fullDrawIndexUint32, true),
++#ifdef __APPLE__
++      ENABLE_FEATURE(core.features, geometryShader, false),
++#else
+       ENABLE_FEATURE(core.features, geometryShader, true),
++#endif
+       ENABLE_FEATURE(core.features, imageCubeArray, true),
+       ENABLE_FEATURE(core.features, independentBlend, true),
+       ENABLE_FEATURE(core.features, largePoints, false),
+@@ -890,7 +894,11 @@
+       ENABLE_FEATURE(core.features, sampleRateShading, true),
+       ENABLE_FEATURE(core.features, samplerAnisotropy, true),
+       ENABLE_FEATURE(core.features, shaderClipDistance, true),
++#ifdef __APPLE__
++      ENABLE_FEATURE(core.features, shaderCullDistance, false),
++#else
+       ENABLE_FEATURE(core.features, shaderCullDistance, true),
++#endif
+       ENABLE_FEATURE(core.features, shaderFloat64, false),
+       ENABLE_FEATURE(core.features, shaderImageGatherExtended, true),
+       ENABLE_FEATURE(core.features, shaderInt16, true),
+@@ -975,7 +983,11 @@
+       ENABLE_EXT_FEATURE(extCustomBorderColor, customBorderColorWithoutFormat, false),
+ 
+       /* Depth clip matches D3D semantics where depth clamp does not */
++#ifdef __APPLE__
++      ENABLE_EXT_FEATURE(extDepthClipEnable, depthClipEnable, false),
++#else
+       ENABLE_EXT_FEATURE(extDepthClipEnable, depthClipEnable, true),
++#endif
+ 
+       /* Controls depth bias behaviour with emulated depth formats */
+       ENABLE_EXT_FEATURE(extDepthBiasControl, depthBiasControl, false),
+diff --git a/src/dxvk/dxvk_graphics.cpp b/src/dxvk/dxvk_graphics.cpp
+--- a/src/dxvk/dxvk_graphics.cpp
++++ b/src/dxvk/dxvk_graphics.cpp
+@@ -617,6 +617,12 @@
+     // this is *not* equivalent to disabling depth clamp.
+     rsDepthClipInfo.pNext = std::exchange(rsInfo.pNext, &rsDepthClipInfo);
+     rsDepthClipInfo.depthClipEnable = state.rs.depthClipEnable();
++#ifdef __APPLE__
++    // Metal couples clipping and clamping. D3D9 has no independent depth
++    // clamp state; use core Vulkan clipping for the normal ZENABLE path.
++    rsInfo.pNext = rsDepthClipInfo.pNext;
++    rsInfo.depthClampEnable = !state.rs.depthClipEnable();
++#endif
+ 
+     // Set up conservative rasterization if requested by the application.
+     if (state.rs.conservativeMode() != VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT) {
+diff --git a/src/dxvk/dxvk_instance.cpp b/src/dxvk/dxvk_instance.cpp
+--- a/src/dxvk/dxvk_instance.cpp
++++ b/src/dxvk/dxvk_instance.cpp
+@@ -219,6 +219,9 @@
+         extensionsEnabled.insert(ext);
+     }
+ 
++#if defined(__APPLE__) && !defined(DXVK_WSI_IOS)
++    extensionsEnabled.insert(vk::makeExtension(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME));
++#endif
+     Logger::info("Enabled instance extensions:");
+ 
+     for (const auto& ext : extensionsEnabled) {
+@@ -249,6 +252,9 @@
+       appInfo.apiVersion            = DxvkVulkanApiVersion;
+ 
+       VkInstanceCreateInfo info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
++#if defined(__APPLE__) && !defined(DXVK_WSI_IOS)
++      info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
++#endif
+       info.pApplicationInfo         = &appInfo;
+       info.enabledLayerCount        = layerNames.size();
+       info.ppEnabledLayerNames      = layerNames.data();
+diff --git a/src/dxvk/dxvk_sampler.h b/src/dxvk/dxvk_sampler.h
+--- a/src/dxvk/dxvk_sampler.h
++++ b/src/dxvk/dxvk_sampler.h
+@@ -372,7 +372,13 @@
+   public:
+ 
+     // Lower limit for sampler counts in Vulkan.
++#ifdef __APPLE__
++    // MoltenVK exposes maxPerSetDescriptors=1212 on Apple M4. The same
++    // bound sizes the pool, descriptor array and LRU, so indices stay valid.
++    constexpr static uint32_t MaxSamplerCount = 1024u;
++#else
+     constexpr static uint32_t MaxSamplerCount = 2048u;
++#endif
+ 
+     DxvkSamplerPool(DxvkDevice* device);
+ 
+diff --git a/src/dxvk/dxvk_unbound.cpp b/src/dxvk/dxvk_unbound.cpp
+--- a/src/dxvk/dxvk_unbound.cpp
++++ b/src/dxvk/dxvk_unbound.cpp
+@@ -79,7 +79,8 @@
+                     | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                     | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT
+                     | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT
+-                    | VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT;
++                    | (m_device->features().extTransformFeedback.transformFeedback
++                        ? VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT : 0);
+     info.stages     = VK_PIPELINE_STAGE_TRANSFER_BIT
+                     | m_device->getShaderPipelineStages();
+     info.access     = VK_ACCESS_UNIFORM_READ_BIT
+diff --git a/src/util/util_env.cpp b/src/util/util_env.cpp
+--- a/src/util/util_env.cpp
++++ b/src/util/util_env.cpp
+@@ -3,7 +3,10 @@
+ #include <filesystem>
+ #include <numeric>
+ 
+-#ifdef __linux__
++#ifdef __APPLE__
++#include <mach-o/dyld.h>
++#include <limits.h>
++#elif defined(__linux__)
+ #include <unistd.h>
+ #include <limits.h>
+ #elif defined(__FreeBSD__)
+@@ -96,6 +99,11 @@
+     exePath.resize(len + 1);
+ 
+     return str::fromws(exePath.data());
++#elif defined(__APPLE__)
++    std::array<char, PATH_MAX> exePath = {};
++    uint32_t size = exePath.size();
++    if (_NSGetExecutablePath(exePath.data(), &size)) return "";
++    return std::string(exePath.data());
+ #elif defined(__linux__)
+     std::array<char, PATH_MAX> exePath = {};
+ 
+@@ -136,7 +144,11 @@
+ #else
+     std::array<char, 16> posixName = {};
+     dxvk::str::strlcpy(posixName.data(), name.c_str(), 16);
++#ifdef __APPLE__
++    ::pthread_setname_np(posixName.data());
++#else
+     ::pthread_setname_np(pthread_self(), posixName.data());
++#endif
+ #endif
+   }
+ 
+diff --git a/src/util/util_win32_compat.h b/src/util/util_win32_compat.h
+--- a/src/util/util_win32_compat.h
++++ b/src/util/util_win32_compat.h
+@@ -1,6 +1,6 @@
+ #pragma once
+ 
+-#if defined(__unix__)
++#if defined(__unix__) || defined(__APPLE__)
+ 
+ #include <windows.h>
+ #include <dlfcn.h>
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -14,6 +14,9 @@
+ #ifdef _WIN32
+       "winevulkan.dll",
+       "vulkan-1.dll",
++#elif defined(__APPLE__)
++      "libvulkan.1.dylib",
++      "libMoltenVK.dylib",
+ #else
+       "libvulkan.so",
+       "libvulkan.so.1",

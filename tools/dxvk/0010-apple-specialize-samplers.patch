@@ -1,0 +1,28 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+# Resolve inactive sampler dimensions/depth paths before SPIR-V -> MSL.
+# Uses the existing Android specialization pass, with the same pipeline keys.
+diff --git a/src/d3d9/d3d9_shader.cpp b/src/d3d9/d3d9_shader.cpp
+--- a/src/d3d9/d3d9_shader.cpp
++++ b/src/d3d9/d3d9_shader.cpp
+@@ -728,7 +728,7 @@
+       fn.isIndexed = bool(index);
+       fn.type = type;
+ 
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(__APPLE__)
+       // RA3: the mobile driver must not see unused depth-compare paths for
+       // color textures. Keep state extraction visible to the IR constant folder.
+       auto value = emitSpecConstant(fn.specId);
+diff --git a/src/dxvk/dxvk_shader_ir.cpp b/src/dxvk/dxvk_shader_ir.cpp
+--- a/src/dxvk/dxvk_shader_ir.cpp
++++ b/src/dxvk/dxvk_shader_ir.cpp
+@@ -2086,7 +2086,7 @@
+         ioPass.enableSampleInterpolation();
+     }
+ 
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(__APPLE__)
+     if (linkage && m_metadata.stage == VK_SHADER_STAGE_VERTEX_BIT &&
+         (linkage->vsScaledSigned | linkage->vsScaledUnsigned)) {
+       using namespace dxbc_spv;

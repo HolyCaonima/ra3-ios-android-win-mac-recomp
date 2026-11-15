@@ -1,0 +1,299 @@
+# Project modifications by HolyCaonima/contributors, 2026; not an upstream release.
+# Upstream context: zlib/libpng license, see LICENSES/DXVK.txt. Original additions: MIT.
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -4,6 +4,7 @@
+ option('enable_d3d10', type : 'boolean', value : true, description: 'Build D3D10')
+ option('enable_d3d11', type : 'boolean', value : true, description: 'Build D3D11')
+ option('build_id',     type : 'boolean', value : false)
++option('native_ios', type: 'boolean', value: false, description: 'RA3 UIKit Metal WSI')
+ option('native_android', type : 'boolean', value : false, description: 'RA3: Android WSI for DXVK Native (ANativeWindow)')
+ option('native_glfw',  type : 'feature', value : 'auto', description: 'Enable GLFW WSI for DXVK Native')
+ option('native_sdl2',  type : 'feature', value : 'auto', description: 'Enable SDL2 WSI for DXVK Native')
+--- a/meson.build
++++ b/meson.build
+@@ -149,6 +149,9 @@
+     './include/native/directx'
+   ]
+ 
++  if get_option('native_ios')
++    compiler_args += ['-DDXVK_WSI_IOS']
++  endif
+   if get_option('native_android')
+     compiler_args += ['-DDXVK_WSI_ANDROID']
+   endif
+@@ -165,7 +168,7 @@
+   if lib_glfw.found()
+     compiler_args += ['-DDXVK_WSI_GLFW']
+   endif
+-  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found() and not get_option('native_android'))
++  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found() and not get_option('native_android') and not get_option('native_ios'))
+     error('SDL3, SDL2, or GLFW are required to build dxvk-native')
+   endif
+   
+--- a/src/wsi/wsi_platform.h
++++ b/src/wsi/wsi_platform.h
+@@ -114,6 +114,9 @@
+ #if defined(DXVK_WSI_WIN32)
+   extern WsiBootstrap Win32WSI;
+ #endif
++#if defined(DXVK_WSI_IOS)
++  extern WsiBootstrap IosWSI;
++#endif
+ #if defined(DXVK_WSI_ANDROID)
+   extern WsiBootstrap AndroidWSI;   // RA3: wsi/android
+ #endif
+--- a/src/wsi/wsi_platform.cpp
++++ b/src/wsi/wsi_platform.cpp
+@@ -14,6 +14,9 @@
+ #endif
+ #if defined(DXVK_WSI_ANDROID)
+     &AndroidWSI,
++#endif
++#if defined(DXVK_WSI_IOS)
++    &IosWSI,
+ #endif
+ #if defined(DXVK_WSI_SDL3)
+     &Sdl3WSI,
+--- a/src/wsi/meson.build
++++ b/src/wsi/meson.build
+@@ -1,5 +1,6 @@
+ wsi_src = [
+   'wsi_edid.cpp',
++  'ios/wsi_platform_ios.cpp',
+   'wsi_platform.cpp',
+   'win32/wsi_monitor_win32.cpp',
+   'win32/wsi_platform_win32.cpp',
+--- a/src/d3d9/meson.build
++++ b/src/d3d9/meson.build
+@@ -60,7 +60,7 @@
+   d3d9_link_depends += files('d3d9.sym')
+ endif
+ 
+-d3d9_dll = shared_library(dxvk_name_prefix+'d3d9', d3d9_src, glsl_generator.process(d3d9_shaders), d3d9_res,
++d3d9_dll = library(dxvk_name_prefix+'d3d9', d3d9_src, glsl_generator.process(d3d9_shaders), d3d9_res,
+   dependencies        : [ dxbc_spirv_dep, dxvk_dep ],
+   include_directories : dxvk_include_path,
+   install             : true,
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -7,9 +7,16 @@
+ #include "../util/util_string.h"
+ #include "../util/util_win32_compat.h"
+ 
++#if defined(DXVK_WSI_IOS)
++extern "C" PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance, const char*);
++#endif
++
+ namespace dxvk::vk {
+ 
+   static std::pair<HMODULE, PFN_vkGetInstanceProcAddr> loadVulkanLibrary() {
++#if defined(DXVK_WSI_IOS)
++    return { nullptr, &vkGetInstanceProcAddr };
++#endif
+     static const std::array<const char*, 2> dllNames = {{
+ #ifdef _WIN32
+       "winevulkan.dll",
+--- a/src/d3d9/d3d9_swapchain.cpp
++++ b/src/d3d9/d3d9_swapchain.cpp
+@@ -4,8 +4,11 @@
+ 
+ #include "d3d9_hud.h"
+ #include "d3d9_window.h"
+-
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_IOS)
++#define dxvk_android_set_present_region dxvk_ios_set_present_region
++#endif
++
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+ extern "C" void dxvk_android_set_present_region(const int32_t*, const int32_t*,
+   const uint32_t*, const uint32_t*);
+ #endif
+@@ -793,7 +796,7 @@
+ 
+       VkRect2D   cursorRect     = { cursorPosition, cursorSize };
+ 
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+       // Keep logical coordinates until the actual presentation image is acquired.
+       m_androidCursorRect = cursorRect;
+ #else
+@@ -878,7 +881,7 @@
+         {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
+         { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
+ 
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+       // Fit against the acquired surface, independent of the game's resolution.
+       const auto extent = backBuffer->info().extent;
+       uint32_t fitW = extent.width, fitH = extent.height;
+@@ -925,7 +928,7 @@
+         cSrcRect        = srcRect,
+         cDstView        = backBuffer->createView(viewInfo),
+         cDstRect        = dstRect,
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+         cCursorRect     = cursorRect,
+ #endif
+         cSync           = sync,
+@@ -944,7 +947,7 @@
+         auto contextObjects = ctx->beginExternalRendering();
+ 
+         VkClearColorValue clearColor = {};
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+         clearColor.float32[3] = 1.0f; // Opaque black bars, including INHERIT surfaces.
+         cBlitter->setCursorPos(cCursorRect);
+ #endif
+--- a/src/d3d9/d3d9_swapchain.h
++++ b/src/d3d9/d3d9_swapchain.h
+@@ -160,7 +160,7 @@
+     RECT                      m_srcRect;
+     RECT                      m_dstRect;
+     VkExtent2D                m_swapchainExtent = { 0u, 0u };
+-#if defined(DXVK_WSI_ANDROID)
++#if defined(DXVK_WSI_ANDROID) || defined(DXVK_WSI_IOS)
+     VkRect2D                  m_androidCursorRect = {};
+ #endif
+     bool                      m_partialCopy = false;
+--- /dev/null
++++ b/src/wsi/ios/wsi_platform_ios.h
+@@ -0,0 +1,39 @@
++#pragma once
++
++#include "../wsi_platform.h"
++
++namespace dxvk::wsi {
++
++  // One UIKit-owned CAMetalLayer, with physical size published by layout.
++  class IosWsiDriver : public WsiDriver {
++  public:
++    std::vector<const char *> getInstanceExtensions() override;
++
++    HMONITOR getDefaultMonitor() override;
++    HMONITOR enumMonitors(uint32_t index) override;
++    HMONITOR enumMonitors(const LUID *adapterLUID[], uint32_t numLUIDs, uint32_t index) override;
++    bool getDisplayName(HMONITOR hMonitor, WCHAR (&Name)[32]) override;
++    bool getDesktopCoordinates(HMONITOR hMonitor, RECT* pRect) override;
++    bool getDisplayMode(HMONITOR hMonitor, uint32_t modeNumber, WsiMode* pMode) override;
++    bool getCurrentDisplayMode(HMONITOR hMonitor, WsiMode* pMode) override;
++    bool getDesktopDisplayMode(HMONITOR hMonitor, WsiMode* pMode) override;
++    WsiEdidData getMonitorEdid(HMONITOR hMonitor) override;
++
++    void getWindowSize(HWND hWindow, uint32_t* pWidth, uint32_t* pHeight) override;
++    void resizeWindow(HWND hWindow, DxvkWindowState* pState, uint32_t width, uint32_t height) override;
++    void saveWindowState(HWND hWindow, DxvkWindowState* pState, bool saveStyle) override;
++    void restoreWindowState(HWND hWindow, DxvkWindowState* pState, bool restoreCoordinates) override;
++    bool setWindowMode(HMONITOR hMonitor, HWND hWindow, DxvkWindowState* pState, const WsiMode& mode) override;
++    bool enterFullscreenMode(HMONITOR hMonitor, HWND hWindow, DxvkWindowState* pState, bool modeSwitch) override;
++    bool leaveFullscreenMode(HWND hWindow, DxvkWindowState* pState) override;
++    bool restoreDisplayMode() override;
++    HMONITOR getWindowMonitor(HWND hWindow) override;
++    bool isWindow(HWND hWindow) override;
++    bool isMinimized(HWND hWindow) override;
++    bool isOccluded(HWND hWindow) override;
++    void updateFullscreenWindow(HMONITOR hMonitor, HWND hWindow, bool forceTopmost) override;
++    VkResult createSurface(HWND hWindow, PFN_vkGetInstanceProcAddr pfnVkGetInstanceProcAddr,
++                           VkInstance instance, VkSurfaceKHR* pSurface) override;
++  };
++
++}
+--- /dev/null
++++ b/src/wsi/ios/wsi_platform_ios.cpp
+@@ -0,0 +1,95 @@
++#if defined(DXVK_WSI_IOS)
++#include "wsi_platform_ios.h"
++#include <mutex>
++#include <vulkan/vulkan_metal.h>
++
++namespace {
++std::mutex mutex;
++void* layer = nullptr;
++uint32_t width = 1280, height = 720, logicalW = 1280, logicalH = 720;
++int32_t regionSrc[4] = {}, regionDst[4] = {};
++uint32_t regionSurface[2] = {}, regionGame[2] = {};
++bool active = true;
++}
++extern "C" {
++void dxvk_ios_set_layer(void* value, uint32_t w, uint32_t h) {
++  std::lock_guard<std::mutex> lock(mutex);
++  layer=value; width=w; height=h;
++}
++void dxvk_ios_set_active(int value) {
++  std::lock_guard<std::mutex> lock(mutex); active=value;
++}
++void dxvk_ios_set_present_region(const int32_t* src, const int32_t* dst,
++    const uint32_t* surface, const uint32_t* game) {
++  std::lock_guard<std::mutex> lock(mutex);
++  std::memcpy(regionSrc,src,sizeof(regionSrc)); std::memcpy(regionDst,dst,sizeof(regionDst));
++  std::memcpy(regionSurface,surface,sizeof(regionSurface)); std::memcpy(regionGame,game,sizeof(regionGame));
++}
++int dxvk_ios_get_present_region(int32_t* src, int32_t* dst, uint32_t* surface, uint32_t* game) {
++  std::lock_guard<std::mutex> lock(mutex);
++  if (!regionDst[2] || !regionDst[3]) return 0;
++  std::memcpy(src,regionSrc,sizeof(regionSrc)); std::memcpy(dst,regionDst,sizeof(regionDst));
++  std::memcpy(surface,regionSurface,sizeof(regionSurface)); std::memcpy(game,regionGame,sizeof(regionGame));
++  return 1;
++}
++}
++namespace dxvk::wsi {
++static HMONITOR monitor = reinterpret_cast<HMONITOR>(uintptr_t(1));
++std::vector<const char*> IosWsiDriver::getInstanceExtensions() {
++  return { VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME };
++}
++HMONITOR IosWsiDriver::getDefaultMonitor() { return monitor; }
++HMONITOR IosWsiDriver::enumMonitors(uint32_t i) { return i ? nullptr : monitor; }
++HMONITOR IosWsiDriver::enumMonitors(const LUID*[], uint32_t, uint32_t i) { return enumMonitors(i); }
++bool IosWsiDriver::getDisplayName(HMONITOR m, WCHAR (&name)[32]) {
++  if (m!=monitor) return false;
++  const WCHAR value[]={'I','P','A','D',0}; std::memcpy(name,value,sizeof(value)); return true;
++}
++bool IosWsiDriver::getDesktopCoordinates(HMONITOR m, RECT* rect) {
++  if (m!=monitor) return false;
++  std::lock_guard<std::mutex> lock(mutex); *rect={0,0,LONG(logicalW),LONG(logicalH)}; return true;
++}
++bool IosWsiDriver::getDisplayMode(HMONITOR m, uint32_t i, WsiMode* mode) {
++  static const uint32_t modes[][2]={{800,600},{1024,768},{1280,720},{1280,800},{1600,900},{1920,1080}};
++  if (m!=monitor || i>=std::size(modes)) return false;
++  mode->width=modes[i][0]; mode->height=modes[i][1]; mode->refreshRate={60,1};
++  mode->bitsPerPixel=32; mode->interlaced=false; return true;
++}
++bool IosWsiDriver::getCurrentDisplayMode(HMONITOR m,WsiMode* mode) {
++  if (m!=monitor) return false;
++  std::lock_guard<std::mutex> lock(mutex); mode->width=logicalW; mode->height=logicalH;
++  mode->refreshRate={60,1}; mode->bitsPerPixel=32; mode->interlaced=false; return true;
++}
++bool IosWsiDriver::getDesktopDisplayMode(HMONITOR m,WsiMode* mode) { return getCurrentDisplayMode(m,mode); }
++WsiEdidData IosWsiDriver::getMonitorEdid(HMONITOR) { return {}; }
++void IosWsiDriver::getWindowSize(HWND,uint32_t* w,uint32_t* h) {
++  std::lock_guard<std::mutex> lock(mutex); if(w)*w=width; if(h)*h=height;
++}
++void IosWsiDriver::resizeWindow(HWND,DxvkWindowState*,uint32_t w,uint32_t h) {
++  std::lock_guard<std::mutex> lock(mutex); if(w && h) {logicalW=w; logicalH=h;}
++}
++void IosWsiDriver::saveWindowState(HWND,DxvkWindowState*,bool) {}
++void IosWsiDriver::restoreWindowState(HWND,DxvkWindowState*,bool) {}
++bool IosWsiDriver::setWindowMode(HMONITOR,HWND w,DxvkWindowState* s,const WsiMode& m) {resizeWindow(w,s,m.width,m.height); return true;}
++bool IosWsiDriver::enterFullscreenMode(HMONITOR,HWND,DxvkWindowState*,bool) {return true;}
++bool IosWsiDriver::leaveFullscreenMode(HWND,DxvkWindowState*) {return true;}
++bool IosWsiDriver::restoreDisplayMode() {return true;}
++HMONITOR IosWsiDriver::getWindowMonitor(HWND) {return monitor;}
++bool IosWsiDriver::isWindow(HWND w) {return uintptr_t(w)==1;}
++bool IosWsiDriver::isMinimized(HWND) {std::lock_guard<std::mutex> lock(mutex); return !active || !layer;}
++bool IosWsiDriver::isOccluded(HWND w) {return isMinimized(w);}
++void IosWsiDriver::updateFullscreenWindow(HMONITOR,HWND,bool) {}
++VkResult IosWsiDriver::createSurface(HWND w,PFN_vkGetInstanceProcAddr proc,VkInstance instance,VkSurfaceKHR* surface) {
++  if(!isWindow(w)) return VK_ERROR_SURFACE_LOST_KHR;
++  auto create=reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(proc(instance,"vkCreateMetalSurfaceEXT"));
++  if(!create) return VK_ERROR_EXTENSION_NOT_PRESENT;
++  std::lock_guard<std::mutex> lock(mutex);
++  if(!layer) return VK_ERROR_SURFACE_LOST_KHR;
++  VkMetalSurfaceCreateInfoEXT info={VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT};
++  info.pLayer=static_cast<const CAMetalLayer*>(layer);
++  return create(instance,&info,nullptr,surface);
++}
++static bool createDriver(WsiDriver** driver) {*driver=new IosWsiDriver(); return true;}
++WsiBootstrap IosWSI={"iOS",createDriver};
++}
++#endif
